@@ -170,6 +170,26 @@ backtick styling over the trailing space."
     (should node)
     (should (member "underline" (org-tickets-test--node-mark-types node)))))
 
+(defun org-tickets-test--subsup-node (content text)
+  "Return the first-paragraph node for org CONTENT whose text is TEXT."
+  (seq-find (lambda (n) (equal (cdr (assoc "text" n)) text))
+            (org-tickets-test--first-paragraph-nodes content)))
+
+(ert-deftest org-tickets-test--adf-braced-subscript-mark ()
+  "A braced subscript like H_{2}O carries an ADF subsup mark of type sub."
+  (let ((node (org-tickets-test--subsup-node "H_{2}O" "2")))
+    (should node)
+    (should (equal (cdr (assoc "marks" node))
+                   '((("type" . "subsup") ("attrs" ("type" . "sub"))))))))
+
+(ert-deftest org-tickets-test--adf-braced-superscript-mark ()
+  "A braced superscript like x^{2} carries an ADF subsup mark of type sup."
+  (let ((node (org-tickets-test--subsup-node "x^{2} here" "2")))
+    (should node)
+    (should (equal (cdr (assoc "marks" node))
+                   '((("type" . "subsup") ("attrs" ("type" . "sup"))))))
+    (should (equal (org-tickets-test--adf-flat-text "x^{2} here") "x2 here"))))
+
 (ert-deftest org-tickets-test--adf-quote-block-blockquote ()
   "A quote block becomes an ADF blockquote wrapping its paragraphs."
   (let ((block (car (org-tickets-test--adf-top-content

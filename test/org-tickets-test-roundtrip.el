@@ -26,6 +26,14 @@
 (ert-deftest org-tickets-test--roundtrip-multiline-paragraph ()
   (should (equal (org-tickets-test--roundtrip "line1\nline2") "line1\nline2")))
 
+(ert-deftest org-tickets-test--roundtrip-sub-superscript ()
+  (should (equal (org-tickets-test--roundtrip "H_{2}O and x^{2}")
+                 "H_{2}O and x^{2}")))
+
+(ert-deftest org-tickets-test--roundtrip-unbraced-underscore-literal ()
+  (should (equal (org-tickets-test--roundtrip "release/26_02 works")
+                 "release/26_02 works")))
+
 (ert-deftest org-tickets-test--roundtrip-bullet-list ()
   (should (equal (org-tickets-test--roundtrip "- alpha\n- beta")
                  "- alpha\n- beta")))

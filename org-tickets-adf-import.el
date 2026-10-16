@@ -73,7 +73,7 @@ other parser configurations."
 
 (defun org-tickets--adf-apply-marks (text marks)
   "Wrap TEXT in org markup for each ADF mark in MARKS.
-Supported: code, strong, em/emphasis, underline, strike, link."
+Supported: code, strong, em/emphasis, underline, strike, subsup, link."
   (let ((result text))
     (dolist (mark marks result)
       (pcase (org-tickets--alist-get "type" mark)
@@ -82,6 +82,12 @@ Supported: code, strong, em/emphasis, underline, strike, link."
         ((or "em" "emphasis") (setq result (format "/%s/" result)))
         ("underline" (setq result (format "_%s_" result)))
         ("strike" (setq result (format "+%s+" result)))
+        ("subsup"
+         (let ((marker (if (equal (org-tickets--alist-get
+                                   "type" (org-tickets--adf-attrs mark))
+                                  "sup")
+                           "^" "_")))
+           (setq result (format "%s{%s}" marker result))))
         ("link"
          (let ((href (org-tickets--alist-get
                       "href" (org-tickets--adf-attrs mark))))

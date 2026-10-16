@@ -394,36 +394,44 @@ Uses the export backend (e.g. HTML) as the code language."
     (when nodes
       (list (org-tickets--adf-node "paragraph" nil nodes)))))
 
-(defun org-tickets--convert-to-adf-script (element marker)
-  "Convert sub/superscript ELEMENT to literal ADF text.
+(defun org-tickets--convert-to-adf-script (element marker subsup-type)
+  "Convert sub/superscript ELEMENT to ADF inline nodes.
 MARKER is the source character (\"_\" for subscript, \"^\" for
-superscript).  Org parses tokens like `26_02' or `x^2' as
-sub/superscripts, but Jira ADF has no such markup, so reconstruct the
-literal source: the MARKER, the content (wrapped in braces when the
-source used them), and the trailing space stored in :post-blank."
-  (let* ((inner (mapconcat (lambda (elem)
-                             (if (stringp elem)
-                                 (substring-no-properties elem)
-                               (let ((nodes (org-tickets--convert-to-adf-content elem)))
-                                 (mapconcat (lambda (node)
-                                              (or (cdr (assoc "text" node)) ""))
-                                            nodes ""))))
-                           (org-element-contents element) ""))
-         (brackets (org-element-property :use-brackets-p element))
-         (post-blank (or (org-element-property :post-blank element) 0))
-         (text (concat marker
-                       (if brackets (concat "{" inner "}") inner)
-                       (make-string post-blank ?\s))))
-    (list (list (cons "type" "text")
-                (cons "text" text)))))
+superscript); SUBSUP-TYPE is the ADF subsup mark type (\"sub\" or
+\"sup\").  Braced forms like `H_{2}O' get a real subsup mark.  Org
+also parses unbraced tokens like `26_02' or `x^2' as sub/superscripts,
+which are usually identifiers, so those become literal source text."
+  (if (org-element-property :use-brackets-p element)
+      (append (org-tickets--adf-add-mark
+               (org-tickets--build-inline-nodes (org-element-contents element))
+               (list (cons "type" "subsup")
+                     (list "attrs" (cons "type" subsup-type))))
+              (org-tickets--adf-text-node
+               (org-tickets--adf-post-blank-spaces element)))
+    (org-tickets--convert-to-adf-script-literal element marker)))
+
+(defun org-tickets--convert-to-adf-script-literal (element marker)
+  "Convert unbraced sub/superscript ELEMENT to literal ADF text.
+Reconstruct the source: MARKER, the content, and the trailing space
+stored in :post-blank."
+  (let ((inner (mapconcat (lambda (elem)
+                            (if (stringp elem)
+                                (substring-no-properties elem)
+                              (let ((nodes (org-tickets--convert-to-adf-content elem)))
+                                (mapconcat (lambda (node)
+                                             (or (cdr (assoc "text" node)) ""))
+                                           nodes ""))))
+                          (org-element-contents element) "")))
+    (org-tickets--adf-text-node
+     (concat marker inner (org-tickets--adf-post-blank-spaces element)))))
 
 (defun org-tickets--convert-to-adf-subscript (element)
-  "Convert org ELEMENT (type subscript) to literal ADF text."
-  (org-tickets--convert-to-adf-script element "_"))
+  "Convert org ELEMENT (type subscript) to ADF inline nodes."
+  (org-tickets--convert-to-adf-script element "_" "sub"))
 
 (defun org-tickets--convert-to-adf-superscript (element)
-  "Convert org ELEMENT (type superscript) to literal ADF text."
-  (org-tickets--convert-to-adf-script element "^"))
+  "Convert org ELEMENT (type superscript) to ADF inline nodes."
+  (org-tickets--convert-to-adf-script element "^" "sup"))
 
 (defun org-tickets--convert-to-adf-macro (element)
   "Convert org ELEMENT (type macro) to ADF content.
