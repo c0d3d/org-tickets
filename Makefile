@@ -24,6 +24,17 @@ help:
 %.elc: %.el
 	$(EMACS) --batch -L . --eval "(setq byte-compile-error-on-warn t)" -f batch-byte-compile $<
 
+# Each .elc depends on the .elc of every org-tickets module its source
+# requires, so dependencies compile first and a change to a module
+# (e.g. a macro) recompiles everything that requires it.
+deps.mk: $(SRCS)
+	@for f in $(SRCS); do \
+	  printf '%s: %s\n' "$${f%.el}.elc" \
+	    "$$(sed -n "s/^(require '\(org-tickets[a-z-]*\)).*/\1.elc/p" $$f | tr '\n' ' ')"; \
+	done > $@
+
+-include deps.mk
+
 test: $(ELCS)
 	@echo "Running tests..."
 	$(EMACS) --batch -L . -L test -l org-tickets-test.el -f ert-run-tests-batch-and-exit
@@ -56,4 +67,4 @@ install: build
 
 clean:
 	@echo "Cleaning..."
-	rm -f *.elc
+	rm -f *.elc deps.mk

@@ -52,7 +52,9 @@ The Makefile provides these targets:
 - `make autoloads` — Generate `org-tickets-autoloads.el` from `;;;###autoload` cookies (gitignored; package.el generates its own on install)
 - `make build` — Compile + generate autoloads
 - `make install` — Build and copy package to `~/.emacs.d/packages/org-tickets` (override with `INSTALL_DIR=...`)
-- `make clean` — Remove `.elc` files
+- `make clean` — Remove `.elc` files and the generated `deps.mk`
+
+`deps.mk` is generated from each source's `(require 'org-tickets-…)` lines, so `.elc` files build in dependency order and editing a module (e.g. a macro) recompiles every module that requires it. Nothing to maintain by hand when adding requires or modules.
 
 **Always run tests via `make test`.** It recompiles changed sources first and puts both `.` and `test/` on the load path.
 
