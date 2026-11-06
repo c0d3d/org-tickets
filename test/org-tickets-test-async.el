@@ -32,109 +32,82 @@
 (require 'org-tickets-async)
 (require 'org-tickets-test-fixtures)
 
-;;;; Helpers
-
-(defmacro org-tickets-test--with-mock-url-retrieve (response-text &rest body)
-  "Execute BODY with `url-retrieve' mocked to respond synchronously.
-RESPONSE-TEXT is the full HTTP response string (headers + body).
-The mock calls the callback immediately in a temp buffer containing RESPONSE-TEXT."
-  (declare (indent 1))
-  `(org-tickets-test--with-stubs ((url-retrieve
-                                (lambda (_url callback &optional _cbargs _silent _inhibit-cookies)
-                                  (with-temp-buffer
-                                    (insert ,response-text)
-                                    (funcall callback nil)))))
-     ,@body))
-
-(defmacro org-tickets-test--with-async-stubs (&rest body)
-  "Execute BODY with config and credential stubs in place.
-Stubs out `org-tickets--resolve-config', `org-tickets--async-build-headers',
-and binds `org-tickets-base-url' so `org-tickets--async-request' can run."
-  (declare (indent 0))
-  `(org-tickets-test--with-stubs ((org-tickets--resolve-config #'ignore)
-                               (org-tickets--async-build-headers
-                                (lambda () (list (cons "Content-Type" "application/json"))))
-                               (run-at-time #'ignore)
-                               (force-mode-line-update #'ignore))
-     (let ((org-tickets-base-url "https://test.atlassian.net"))
-       ,@body)))
-
 ;;;; Tests: org-tickets--async-request
 
 (ert-deftest org-tickets-test--async-request-success-parses-json ()
   "Verify callback receives parsed JSON on a 200 response.
 The JSON parser returns symbol keys by default, so use assq or symbol assoc."
-  (org-tickets-test--with-async-stubs
-    (org-tickets-test--with-mock-url-retrieve
-        "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"key\":\"PROJ-123\"}"
-      (with-temp-buffer
-        (org-tickets--rate-limit-reset)
-        (let (got-response got-err)
-          (org-tickets--async-request
-           "GET" "/rest/api/3/issue/PROJ-123"
-           (lambda (response err)
-             (setq got-response response
-                   got-err err)))
-          (should (null got-err))
-          (should got-response)
-          ;; json-read-from-string returns symbol keys by default
-          (should (string= (cdr (assq 'key got-response)) "PROJ-123")))))))
+  (org-tickets-test--with-url-responses
+      (list "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"key\":\"PROJ-123\"}")
+      nil
+    (with-temp-buffer
+      (org-tickets--rate-limit-reset)
+      (let (got-response got-err)
+        (org-tickets--async-request
+         "GET" "/rest/api/3/issue/PROJ-123"
+         (lambda (response err)
+           (setq got-response response
+                 got-err err)))
+        (should (null got-err))
+        (should got-response)
+        ;; json-read-from-string returns symbol keys by default
+        (should (string= (cdr (assq 'key got-response)) "PROJ-123"))))))
 
 (ert-deftest org-tickets-test--async-request-error-response-passes-error-string ()
   "Verify callback receives nil response and an error string on a non-2xx response."
-  (org-tickets-test--with-async-stubs
-    (org-tickets-test--with-mock-url-retrieve
-        "HTTP/1.1 500 Internal Server Error\nContent-Type: application/json\n\n{\"errorMessages\":[\"Something went wrong\"]}"
-      (with-temp-buffer
-        (org-tickets--rate-limit-reset)
-        (let (got-response got-err)
-          (org-tickets--async-request
-           "GET" "/rest/api/3/issue/PROJ-123"
-           (lambda (response err)
-             (setq got-response response
-                   got-err err)))
-          (should (null got-response))
-          (should got-err)
-          (should (stringp got-err))
-          (should (string-match-p "Jira API error" got-err)))))))
+  (org-tickets-test--with-url-responses
+      (list "HTTP/1.1 500 Internal Server Error\nContent-Type: application/json\n\n{\"errorMessages\":[\"Something went wrong\"]}")
+      nil
+    (with-temp-buffer
+      (org-tickets--rate-limit-reset)
+      (let (got-response got-err)
+        (org-tickets--async-request
+         "GET" "/rest/api/3/issue/PROJ-123"
+         (lambda (response err)
+           (setq got-response response
+                 got-err err)))
+        (should (null got-response))
+        (should got-err)
+        (should (stringp got-err))
+        (should (string-match-p "Jira API error" got-err))))))
 
 (ert-deftest org-tickets-test--async-request-empty-body-passes-nil-nil ()
   "Verify callback receives nil response and nil error on a 204 No Content response."
-  (org-tickets-test--with-async-stubs
-    (org-tickets-test--with-mock-url-retrieve
-        "HTTP/1.1 204 No Content\n\n"
-      (with-temp-buffer
-        (org-tickets--rate-limit-reset)
-        (let (called got-response got-err)
-          (org-tickets--async-request
-           "DELETE" "/rest/api/3/issue/PROJ-123"
-           (lambda (response err)
-             (setq called t
-                   got-response response
-                   got-err err)))
-          (should called)
-          (should (null got-response))
-          (should (null got-err)))))))
+  (org-tickets-test--with-url-responses
+      (list "HTTP/1.1 204 No Content\n\n")
+      nil
+    (with-temp-buffer
+      (org-tickets--rate-limit-reset)
+      (let (called got-response got-err)
+        (org-tickets--async-request
+         "DELETE" "/rest/api/3/issue/PROJ-123"
+         (lambda (response err)
+           (setq called t
+                 got-response response
+                 got-err err)))
+        (should called)
+        (should (null got-response))
+        (should (null got-err))))))
 
 (ert-deftest org-tickets-test--async-request-success-malformed-json-passes-error ()
   "A 2xx response with an unparseable body invokes the callback once with
 a \"JSON parse error\" string and a nil response, rather than signalling."
-  (org-tickets-test--with-async-stubs
-    (org-tickets-test--with-mock-url-retrieve
-        "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{not valid json"
-      (with-temp-buffer
-        (org-tickets--rate-limit-reset)
-        (let ((call-count 0) got-response got-err)
-          (org-tickets--async-request
-           "GET" "/rest/api/3/issue/PROJ-123"
-           (lambda (response err)
-             (setq call-count (1+ call-count))
-             (setq got-response response
-                   got-err err)))
-          (should (= call-count 1))
-          (should (null got-response))
-          (should (stringp got-err))
-          (should (string-match-p "JSON parse error" got-err)))))))
+  (org-tickets-test--with-url-responses
+      (list "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{not valid json")
+      nil
+    (with-temp-buffer
+      (org-tickets--rate-limit-reset)
+      (let ((call-count 0) got-response got-err)
+        (org-tickets--async-request
+         "GET" "/rest/api/3/issue/PROJ-123"
+         (lambda (response err)
+           (setq call-count (1+ call-count))
+           (setq got-response response
+                 got-err err)))
+        (should (= call-count 1))
+        (should (null got-response))
+        (should (stringp got-err))
+        (should (string-match-p "JSON parse error" got-err))))))
 
 (ert-deftest org-tickets-test--async-request-429-requeues-thunk ()
   "Verify a 429 response sets throttled state and re-queues the thunk.
@@ -146,18 +119,14 @@ dead response buffer."
   (with-temp-buffer
     (org-tickets--rate-limit-reset)
     (let ((state-buffer (current-buffer)))
-      (org-tickets-test--with-async-stubs
-        (org-tickets-test--with-stubs ((url-retrieve
-                                     (lambda (_url callback &optional _cbargs _silent _inhibit)
-                                       ;; Simulate url-retrieve: callback runs in a fresh
-                                       ;; response buffer, distinct from the state buffer.
-                                       (with-temp-buffer
-                                         (insert "HTTP/1.1 429 Too Many Requests\nRetry-After: 3\n\n")
-                                         (funcall callback nil)))))
-          (let ((org-tickets-base-url "https://test.atlassian.net"))
-            (org-tickets--async-request
-             "GET" "/rest/api/3/issue/PROJ-123"
-             #'ignore))))
+      ;; The fake answers in a fresh response buffer, distinct from the
+      ;; state buffer.
+      (org-tickets-test--with-url-responses
+          (list "HTTP/1.1 429 Too Many Requests\nRetry-After: 3\n\n")
+          nil
+        (org-tickets--async-request
+         "GET" "/rest/api/3/issue/PROJ-123"
+         #'ignore))
       (with-current-buffer state-buffer
         (let ((state (org-tickets--rate-state)))
           ;; After 429: throttled-p should be set
@@ -169,25 +138,23 @@ dead response buffer."
 
 (ert-deftest org-tickets-test--async-request-encoding-utf8 ()
   "Verify JSON request body is UTF-8 encoded for non-ASCII data."
-  (let ((captured-data nil))
-    (org-tickets-test--with-async-stubs
-      (org-tickets-test--with-stubs ((url-retrieve
-                                   (lambda (_url _callback &optional _cbargs _silent _inhibit-cookies)
-                                     (setq captured-data url-request-data))))
-        (with-temp-buffer
-          (org-tickets--rate-limit-reset)
-          (org-tickets--async-request
-           "POST" "/rest/api/3/issue"
-           #'ignore
-           (list (cons "summary" "Café résumé — español")))
-          (should captured-data)
-          ;; The encoded bytes should be longer than the raw Elisp string
-          ;; because multi-byte chars get expanded to multiple UTF-8 bytes
-          (should (> (length captured-data) 10))
-          ;; The content should decode back to valid UTF-8 containing the original text
-          (let ((decoded (decode-coding-string captured-data 'utf-8)))
-            (should (string-match-p "Caf" decoded))
-            (should (string-match-p "summary" decoded))))))))
+  (let ((calls nil))
+    (org-tickets-test--with-url-responses :deferred calls
+      (with-temp-buffer
+        (org-tickets--rate-limit-reset)
+        (org-tickets--async-request
+         "POST" "/rest/api/3/issue"
+         #'ignore
+         (list (cons "summary" "Café résumé — español")))))
+    (let ((captured-data (plist-get (car calls) :data)))
+      (should captured-data)
+      ;; The encoded bytes should be longer than the raw Elisp string
+      ;; because multi-byte chars get expanded to multiple UTF-8 bytes
+      (should (> (length captured-data) 10))
+      ;; The content should decode back to valid UTF-8 containing the original text
+      (let ((decoded (decode-coding-string captured-data 'utf-8)))
+        (should (string-match-p "Caf" decoded))
+        (should (string-match-p "summary" decoded))))))
 
 ;;;; Tests: org-tickets--async-batch
 
@@ -561,22 +528,20 @@ leaves the shared entry installed on the default mode line."
 (ert-deftest org-tickets-test--api-request-kills-response-buffer-and-tolerates-percent ()
   "The sync path must kill its response buffer and never treat the URL
 as a format string (URLs with %20 crashed `message')."
-  (let ((org-tickets-base-url "https://test.example")
-        (org-tickets--credentials-cache '(("test.example" "u" . "t")))
-        (made-buffer nil))
-    (org-tickets-test--with-stubs ((url-retrieve-synchronously
-                                 (lambda (_url &rest _)
-                                   (setq made-buffer (generate-new-buffer " test-http"))
-                                   (with-current-buffer made-buffer
-                                     (insert "HTTP/1.1 200 OK\n\n{\"ok\": true}"))
-                                   made-buffer)))
-      (let ((response (org-tickets--api-request "GET" "/rest/api/3/search?jql=a%20b")))
-        (should (eq (cdr (assq 'ok response)) t))
-        (should-not (buffer-live-p made-buffer))))))
+  (let ((made-buffer nil))
+    (org-tickets-test--with-fake-config
+      (org-tickets-test--with-stubs ((url-retrieve-synchronously
+                                   (lambda (_url &rest _)
+                                     (setq made-buffer (generate-new-buffer " test-http"))
+                                     (with-current-buffer made-buffer
+                                       (insert "HTTP/1.1 200 OK\n\n{\"ok\": true}"))
+                                     made-buffer)))
+        (let ((response (org-tickets--api-request "GET" "/rest/api/3/search?jql=a%20b")))
+          (should (eq (cdr (assq 'ok response)) t))
+          (should-not (buffer-live-p made-buffer)))))))
 
 (ert-deftest org-tickets-test--api-request-nil-buffer-is-clear-error ()
-  (let ((org-tickets-base-url "https://test.example")
-        (org-tickets--credentials-cache '(("test.example" "u" . "t"))))
+  (org-tickets-test--with-fake-config
     (org-tickets-test--with-stubs ((url-retrieve-synchronously
                                  (lambda (&rest _) nil)))
       (should-error (org-tickets--api-request "GET" "/x")))))
@@ -589,19 +554,15 @@ not in url.el's response buffer."
   (with-temp-buffer
     (org-tickets--rate-limit-reset)
     (let ((org-buffer (current-buffer))
-          (org-tickets-base-url "https://test.example")
-          (org-tickets--credentials-cache '(("test.example" "u" . "t")))
-          (captured-cb nil) (got-buffer nil) (got-response nil))
-      (org-tickets-test--with-stubs ((url-retrieve
-                                   (lambda (_url cb &rest _) (setq captured-cb cb) nil)))
+          (calls nil) (got-buffer nil) (got-response nil))
+      (org-tickets-test--with-url-responses :deferred calls
         (org-tickets--async-request
          "GET" "/x"
          (lambda (resp _err)
            (setq got-buffer (current-buffer) got-response resp)))
-        (should captured-cb)
-        (with-temp-buffer          ; simulate url.el's response buffer
-          (insert "HTTP/1.1 200 OK\n\n{\"a\": 1}")
-          (funcall captured-cb nil))
+        (should calls)
+        ;; Answered in a fresh buffer, like url.el's response buffer.
+        (org-tickets-test--url-respond (car calls) "HTTP/1.1 200 OK\n\n{\"a\": 1}")
         (should (eq got-buffer org-buffer))
         (should (equal (cdr (assq 'a got-response)) 1))))))
 
@@ -611,34 +572,29 @@ and the retry timer must drain that same buffer's queue."
   (with-temp-buffer
     (org-tickets--rate-limit-reset)
     (let ((org-buffer (current-buffer))
-          (org-tickets-base-url "https://test.example")
-          (org-tickets--credentials-cache '(("test.example" "u" . "t")))
-          (captured-cb nil) (timer-fn nil) (fired 0))
-      (org-tickets-test--with-stubs ((url-retrieve
-                                   (lambda (_url cb &rest _)
-                                     (setq fired (1+ fired)) (setq captured-cb cb) nil))
-                                  (run-at-time
-                                   (lambda (_secs _repeat fn &rest _) (setq timer-fn fn) nil)))
-        (org-tickets--async-request "GET" "/x" #'ignore)
-        (should (= fired 1))
-        (with-temp-buffer
-          (insert "HTTP/1.1 429 Too Many Requests\nRetry-After: 3\n\n")
-          (funcall captured-cb nil))
-        ;; State is in ORG-BUFFER (the old code stored it in the dead
-        ;; response buffer, losing the queued retry forever).
-        (with-current-buffer org-buffer
-          (let ((state (org-tickets--rate-state)))
-            (should (org-tickets--rate-limit-state-throttled-p state))
-            (should (= 1 (length (org-tickets--rate-limit-state-pending-queue state))))))
-        (should timer-fn)
-        ;; Timer fires with some unrelated buffer current — must still
-        ;; resume ORG-BUFFER's queue.
-        (with-temp-buffer (funcall timer-fn))
-        (should (= fired 2))
-        (with-current-buffer org-buffer
-          (let ((state (org-tickets--rate-state)))
-            (should-not (org-tickets--rate-limit-state-throttled-p state))
-            (should (null (org-tickets--rate-limit-state-pending-queue state)))))))))
+          (calls nil) (timer-fn nil))
+      (org-tickets-test--with-url-responses :deferred calls
+        (org-tickets-test--with-stubs ((run-at-time
+                                     (lambda (_secs _repeat fn &rest _) (setq timer-fn fn) nil)))
+          (org-tickets--async-request "GET" "/x" #'ignore)
+          (should (= (length calls) 1))
+          (org-tickets-test--url-respond
+           (car calls) "HTTP/1.1 429 Too Many Requests\nRetry-After: 3\n\n")
+          ;; State is in ORG-BUFFER (the old code stored it in the dead
+          ;; response buffer, losing the queued retry forever).
+          (with-current-buffer org-buffer
+            (let ((state (org-tickets--rate-state)))
+              (should (org-tickets--rate-limit-state-throttled-p state))
+              (should (= 1 (length (org-tickets--rate-limit-state-pending-queue state))))))
+          (should timer-fn)
+          ;; Timer fires with some unrelated buffer current — must still
+          ;; resume ORG-BUFFER's queue.
+          (with-temp-buffer (funcall timer-fn))
+          (should (= (length calls) 2))
+          (with-current-buffer org-buffer
+            (let ((state (org-tickets--rate-state)))
+              (should-not (org-tickets--rate-limit-state-throttled-p state))
+              (should (null (org-tickets--rate-limit-state-pending-queue state))))))))))
 
 ;;;; Tests: Error boundary around async callbacks
 
@@ -660,20 +616,14 @@ and the retry timer must drain that same buffer's queue."
   (with-temp-buffer
     (org-tickets--rate-limit-reset)
     (let ((org-tickets-max-concurrent-requests 2)
-          (org-tickets-base-url "https://test.example")
-          (org-tickets--credentials-cache '(("test.example" "u" . "t")))
-          (callbacks nil))
-      (org-tickets-test--with-stubs ((url-retrieve
-                                   (lambda (_url cb &rest _) (push cb callbacks) nil)))
+          (calls nil))
+      (org-tickets-test--with-url-responses :deferred calls
         (dotimes (_ 3)
           (org-tickets--async-request "GET" "/x" #'ignore))
-        (should (= (length callbacks) 2))   ; third is queued
+        (should (= (length calls) 2))   ; third is queued
         ;; Complete one request -> queued one fires.
-        (let ((cb (pop callbacks)))
-          (with-temp-buffer
-            (insert "HTTP/1.1 200 OK\n\n{}")
-            (funcall cb nil)))
-        (should (= (length callbacks) 2))))))
+        (org-tickets-test--url-respond (car calls) "HTTP/1.1 200 OK\n\n{}")
+        (should (= (length calls) 3))))))
 
 (provide 'org-tickets-test-async)
 ;;; org-tickets-test-async.el ends here

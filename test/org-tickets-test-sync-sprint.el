@@ -37,19 +37,13 @@
 ;;;; Tests for Sprint API Format
 
 (defmacro org-tickets-test--capturing-requests (requests &rest body)
-  "Run BODY with Jira requests stubbed; push each (METHOD ENDPOINT DATA) onto REQUESTS.
-Sprint names resolve to 3453 and the Story issue type is known."
+  "Run BODY against a fake Jira API that logs each request on REQUESTS.
+REQUESTS is a `:log' variable of `org-tickets-test--fake-jira-handler';
+issue creates answer with key PROJ-9 and sprint names resolve to 3453."
   (declare (indent 1))
-  `(org-tickets-test--with-stubs
-       ((org-tickets--api-request
-         (lambda (method endpoint &optional data)
-           (push (list method endpoint data) ,requests)
-           (org-tickets-test--json "{\"key\": \"PROJ-9\"}")))
-        (org-tickets--resolve-sprint-id (lambda (_name) 3453))
-        (org-tickets--ensure-issue-types #'ignore))
-     (let ((org-tickets-default-sprint nil)
-           (org-tickets-project-id "12345")
-           (org-tickets--issue-type-ids '(("Story" . "10001"))))
+  `(org-tickets-test--with-fake-api
+       (org-tickets-test--fake-jira-handler :post-keys '("PROJ-9") :log ,requests)
+     (org-tickets-test--with-stubs ((org-tickets--resolve-sprint-id (lambda (_name) 3453)))
        ,@body)))
 
 (defun org-tickets-test--sent-field (request field)

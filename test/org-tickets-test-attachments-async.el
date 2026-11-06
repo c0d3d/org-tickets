@@ -33,29 +33,6 @@
 
 ;;;; Helpers
 
-(defmacro org-tickets-test--with-url-responses (responses calls &rest body)
-  "Run BODY with `url-retrieve' answering from RESPONSES in order.
-Each element of RESPONSES is a full HTTP response string.  Each request
-is recorded on CALLS (a variable, newest first) as a plist with :url,
-:method, :headers and :data."
-  (declare (indent 2))
-  (let ((queue (make-symbol "queue")))
-    `(let ((,queue ,responses))
-       (org-tickets-test--with-stubs
-           ((url-retrieve
-             (lambda (url callback &optional _cbargs _silent _inhibit-cookies)
-               (push (list :url url :method url-request-method
-                           :headers url-request-extra-headers
-                           :data url-request-data)
-                     ,calls)
-               (with-temp-buffer
-                 (set-buffer-multibyte nil)
-                 (insert (pop ,queue))
-                 (funcall callback nil))))
-            (run-at-time #'ignore)
-            (force-mode-line-update #'ignore))
-         ,@body))))
-
 (defun org-tickets-test--file-bytes (path)
   "Return the contents of PATH as a unibyte string."
   (with-temp-buffer
@@ -72,14 +49,12 @@ is recorded on CALLS (a variable, newest first) as a plist with :url,
         (temp-dir (make-temp-file "org-tickets-test-" t)))
     (unwind-protect
         (progn
-          (org-tickets-test--with-stubs ((org-tickets--async-build-headers
-                                          (lambda () '(("Authorization" . "Basic dGVzdA==")))))
-            (org-tickets-test--with-url-responses
-                (list "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n\r\nPNG\0\377data")
-                calls
-              (org-tickets--async-download-attachment
-               "https://jira.test/attachment/123/file.png" "file.png" temp-dir 1024
-               (lambda (path err) (setq callback-result (list path err))))))
+          (org-tickets-test--with-url-responses
+              (list "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n\r\nPNG\0\377data")
+              calls
+            (org-tickets--async-download-attachment
+             "https://jira.test/attachment/123/file.png" "file.png" temp-dir 1024
+             (lambda (path err) (setq callback-result (list path err)))))
           (should (= (length calls) 1))
           (should (equal (plist-get (car calls) :method) "GET"))
           (should (equal (car callback-result) (expand-file-name "file.png" temp-dir)))
@@ -95,15 +70,13 @@ is recorded on CALLS (a variable, newest first) as a plist with :url,
         (temp-dir (make-temp-file "org-tickets-test-" t)))
     (unwind-protect
         (progn
-          (org-tickets-test--with-stubs ((org-tickets--async-build-headers
-                                          (lambda () '(("Authorization" . "Basic dGVzdA==")))))
-            (org-tickets-test--with-url-responses
-                (list "HTTP/1.1 303 See Other\r\nlocation: https://media.test/file?token=x\r\n\r\n"
-                      "HTTP/1.1 200 OK\r\n\r\nbody")
-                calls
-              (org-tickets--async-download-attachment
-               "https://jira.test/attachment/123/file.txt" "file.txt" temp-dir 4
-               (lambda (path err) (setq callback-result (list path err))))))
+          (org-tickets-test--with-url-responses
+              (list "HTTP/1.1 303 See Other\r\nlocation: https://media.test/file?token=x\r\n\r\n"
+                    "HTTP/1.1 200 OK\r\n\r\nbody")
+              calls
+            (org-tickets--async-download-attachment
+             "https://jira.test/attachment/123/file.txt" "file.txt" temp-dir 4
+             (lambda (path err) (setq callback-result (list path err)))))
           (let ((redirected (car calls)))
             (should (equal (plist-get redirected :url) "https://media.test/file?token=x"))
             (should-not (assoc "Authorization" (plist-get redirected :headers))))
@@ -135,14 +108,12 @@ is recorded on CALLS (a variable, newest first) as a plist with :url,
         (temp-dir (make-temp-file "org-tickets-test-" t)))
     (unwind-protect
         (progn
-          (org-tickets-test--with-stubs ((org-tickets--async-build-headers
-                                          (lambda () '(("Authorization" . "Basic dGVzdA==")))))
-            (org-tickets-test--with-url-responses
-                (list "HTTP/1.1 404 Not Found\r\n\r\n")
-                calls
-              (org-tickets--async-download-attachment
-               "https://jira.test/attachment/123/file.png" "file.png" temp-dir 1024
-               (lambda (path err) (setq callback-result (list path err))))))
+          (org-tickets-test--with-url-responses
+              (list "HTTP/1.1 404 Not Found\r\n\r\n")
+              calls
+            (org-tickets--async-download-attachment
+             "https://jira.test/attachment/123/file.png" "file.png" temp-dir 1024
+             (lambda (path err) (setq callback-result (list path err)))))
           (should-not (car callback-result))
           (should (string-match-p "404" (cadr callback-result)))
           (should-not (file-exists-p (expand-file-name "file.png" temp-dir))))
@@ -151,16 +122,13 @@ is recorded on CALLS (a variable, newest first) as a plist with :url,
 ;;;; Async Upload Tests
 
 (defmacro org-tickets-test--with-upload-file (var contents &rest body)
-  "Bind VAR to a temp file holding CONTENTS and Jira credentials, then run BODY."
+  "Bind VAR to a temp file holding CONTENTS, then run BODY."
   (declare (indent 2))
   `(let ((,var (make-temp-file "org-tickets-test-upload")))
      (unwind-protect
          (progn
            (with-temp-file ,var (insert ,contents))
-           (let ((org-tickets-base-url "https://test.atlassian.net")
-                 (org-tickets--credentials-cache
-                  '(("test.atlassian.net" "user@test.com" . "token123"))))
-             ,@body))
+           ,@body)
        (delete-file ,var))))
 
 (ert-deftest org-tickets-test--async-upload-attachment-success ()
@@ -252,8 +220,7 @@ url.el sends the file bytes unchanged."
                                        (lambda (_create) temp-dir)))
             (with-temp-buffer
               (org-mode)
-              (insert "* Ticket\n")
-              (org-entry-put (point) "JIRA_KEY" "PROJ-1")
+              (org-tickets-test--insert-ticket 1 "Ticket" "JIRA_KEY" "PROJ-1")
               (org-tickets--async-download-attachments
                "PROJ-1"
                (org-tickets-test--json "[{\"filename\": \"exists.txt\", \"size\": 5, \"content\": \"https://jira.test/exists.txt\"}, \
@@ -298,8 +265,7 @@ url.el sends the file bytes unchanged."
                                        (lambda (_create) temp-dir)))
             (with-temp-buffer
               (org-mode)
-              (insert "* Ticket\n")
-              (org-entry-put (point) "JIRA_KEY" "PROJ-1")
+              (org-tickets-test--insert-ticket 1 "Ticket" "JIRA_KEY" "PROJ-1")
               (org-tickets--async-upload-attachments
                "PROJ-1"
                ;; Jira already has "existing.txt"
@@ -320,8 +286,7 @@ url.el sends the file bytes unchanged."
                                  (lambda (_create) nil)))
       (with-temp-buffer
         (org-mode)
-        (insert "* Ticket\n")
-        (org-entry-put (point) "JIRA_KEY" "PROJ-1")
+        (org-tickets-test--insert-ticket 1 "Ticket" "JIRA_KEY" "PROJ-1")
         (org-tickets--async-upload-attachments
          "PROJ-1" nil
          (lambda (results err)

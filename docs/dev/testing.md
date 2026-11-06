@@ -81,21 +81,69 @@ When a test file exceeds 750 lines, split by category (e.g., `org-tickets-test-a
   Every stub's replacement form is evaluated before any function cell is
   written, so a stub expression never observes a half-stubbed world. Symbols
   that were unbound beforehand are left unbound again.
-- `org-tickets-test--with-sync-mocks` — macro that stubs the async HTTP layer
-  and every side-effectful helper (attachments, links, config), then runs
-  BODY. Its argument is a `(method endpoint callback &optional data)`
-  lambda; capture `data` to assert on request payloads.
-- Configuration: let-bind the defcustoms (`org-tickets-base-url`,
-  `org-tickets-project-key`, `org-tickets-project-id`) — they are read on
-  every request. For real HTTP-layer code paths, also bind
-  `org-tickets--credentials-cache` to `'(("HOST" "user" . "token"))` (or stub
-  `auth-source-search`) so no test reads `~/.authinfo`.
-- `org-tickets-test--make-get-response` — fake `GET /issue` response, with
-  optional sprint and due date.
-- `org-tickets-test--insert-feature` / `org-tickets-test--insert-story` — build
-  ticket headings in the current org buffer.
-- `org-tickets-test--run-sync` — clear the sync guard and read-only lock, then
-  call `org-tickets--sync-to-jira` on the current buffer.
+- Configuration: wrap the test in `org-tickets-test--with-fake-config`. It
+  binds the defcustoms (`org-tickets-base-url` = `https://test.atlassian.net`,
+  `org-tickets-project-key` = `PROJ`, `org-tickets-project-id` = `12345`),
+  starts from an empty `org-tickets--credentials-cache` and stubs
+  `auth-source-search` with a fixed login, so even `org-tickets--resolve-config`
+  runs for real and no test reads `~/.authinfo`. Every harness below uses it.
+
+### Fake Jira (`org-tickets-test-fixtures.el`)
+
+Pick the layer the code under test talks to:
+
+| Code under test calls | Fake |
+|---|---|
+| `url-retrieve` (async HTTP layer, attachments) | `--with-url-responses` |
+| `org-tickets--async-request` | `--fake-jira-handler` (stub it in, or pass it to `--with-sync-mocks`) |
+| `org-tickets--api-request` (synchronous commands) | `--with-fake-api` + `--fake-jira-handler` |
+| `org-tickets--sync-to-jira` (whole pipeline) | `--with-sync-mocks` + `--run-sync` |
+
+- `--with-url-responses RESPONSES CALLS &rest BODY` — `url-retrieve` answers
+  from RESPONSES (full HTTP strings), in order and synchronously, in a fresh
+  unibyte buffer. Pass `:deferred` instead of a list to only log requests and
+  answer each later with `--url-respond CALL RESPONSE` (out-of-order
+  completion, 429 retries, concurrency caps). CALLS, unless nil, is a variable
+  each request is pushed onto as `(:url :method :headers :data :callback)`.
+  Also stubs `run-at-time`/`force-mode-line-update` and applies
+  `--with-fake-config`.
+- `--fake-jira-handler &rest ARGS` (macro) — returns a fake
+  `org-tickets--async-request`. `:get` is the response to every GET or a
+  function of the endpoint (default `--make-get-response`); `:post-keys` are
+  handed out in order to issue creates (`POST /rest/api/3/issue`), the last
+  repeating (default `("PROJ-NEW")`); `:log VAR` pushes each request onto VAR
+  as `(METHOD ENDPOINT DATA)`. Everything else answers empty. Assert on the
+  log instead of keeping per-test counters:
+  - `--requests LOG METHOD &optional ENDPOINT` — matching requests, oldest
+    first (ENDPOINT is exact).
+  - `--payload-field DATA FIELD` — a field of a create/update payload; match
+    payloads by `summary`, not by internal ids.
+  - `--logged-links LOG` — the `(BLOCKER BLOCKED TYPE)` issue links POSTed.
+- `--with-fake-api HANDLER &rest BODY` — routes the synchronous
+  `org-tickets--api-request` through HANDLER (via `--sync-api`), pre-resolves
+  the Story issue type and clears the default sprint.
+- `--with-sync-mocks HANDLER [:real (FN ...)] &rest BODY` — runs the sync
+  pipeline against HANDLER (nil = a default `--fake-jira-handler`). Stubs
+  issue-type/sprint-cache setup, both attachment batch functions,
+  `org-tickets--async-sync-ticket-links` and
+  `org-tickets--build-adf-description` (returns nil: no pipeline test sees a
+  pushed description). **The synchronous `org-tickets--get-ticket` is routed
+  through HANDLER** as `GET /rest/api/3/issue/KEY`, so parent lookups for
+  due-date/fix-version inheritance hit the same fake and appear in its log.
+  `:real (FN ...)` leaves the named functions unstubbed, e.g.
+  `:real (org-tickets--async-sync-ticket-links)` to send real link requests
+  through HANDLER.
+- `--run-sync` — clear the sync guard and read-only lock, then call
+  `org-tickets--sync-to-jira` with `org-tickets--progress-install` stubbed
+  (it writes the global default of `mode-line-misc-info`, which would leak
+  between tests). Only a test of the re-entrancy guard calls
+  `org-tickets--sync-to-jira` directly.
+- `--make-get-response &optional SPRINT DUE-DATE` — fake `GET /issue`
+  response.
+- Headings: `--insert-ticket LEVEL TITLE &rest PROPS` appends a heading at
+  `point-max` with PROPS (`"NAME" VALUE` pairs, nil values skipped);
+  `--insert-feature TITLE KEY &rest PROPS` and
+  `--insert-story TITLE KEY PARENT-KEY &rest PROPS` are wrappers.
 
 Any test that drives the whole pipeline uses these; keep them here rather
 than in one suite so the others can reuse them.

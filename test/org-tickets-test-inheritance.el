@@ -43,14 +43,6 @@
   "Return the single fixVersions name in a request DATA payload, or nil."
   (cdr (assoc "name" (car (cdr (assq 'fixVersions (cdr (assq 'fields data))))))))
 
-(defun org-tickets-test--insert-child (title type &optional key)
-  "Insert a level-2 ticket heading with TITLE, JIRA_TYPE TYPE and KEY."
-  (goto-char (point-max))
-  (insert (format "** %s\n" title))
-  (org-entry-put (point) "JIRA_TYPE" type)
-  (when key
-    (org-entry-put (point) "JIRA_KEY" key)))
-
 ;;;; The buffer pass
 
 (ert-deftest org-tickets-test--due-date-inherited-from-outline-parent ()
@@ -165,63 +157,46 @@
   "A story created this sync is POSTed with the due date it inherits.
 The date used to be written to org only in phase 3, after the POST, so
 Jira kept an empty due date until the next sync."
-  (let ((post-payloads nil))
+  (let ((requests nil))
     (org-tickets-test--with-sync-mocks
-        (lambda (method _endpoint callback &optional data)
-          (pcase method
-            ("GET" (funcall callback (org-tickets-test--make-get-response) nil))
-            ("PUT" (funcall callback nil nil))
-            ("POST" (push data post-payloads)
-             (funcall callback (org-tickets-test--json "{\"key\": \"P-2\"}") nil))))
+        (org-tickets-test--fake-jira-handler :post-keys '("P-2") :log requests)
       (with-temp-buffer
         (org-mode)
-        (org-tickets-test--insert-feature "Feature" "P-1")
-        (org-entry-put (point) "DUE_DATE" "2026-08-01")
-        (goto-char (point-max))
+        (org-tickets-test--insert-feature "Feature" "P-1" "DUE_DATE" "2026-08-01")
         (org-tickets-test--insert-story "New Story" nil nil)
         (org-tickets-test--run-sync)
         ;; ...and org records it too.
         (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01"))))
-    (should (= 1 (length post-payloads)))
-    (should (equal (org-tickets-test--payload-due-date (car post-payloads))
-                   "2026-08-01"))))
+    (let ((posts (org-tickets-test--requests requests "POST" "/rest/api/3/issue")))
+      (should (= 1 (length posts)))
+      (should (equal (org-tickets-test--payload-due-date (nth 2 (car posts)))
+                     "2026-08-01")))))
 
 (ert-deftest org-tickets-test--existing-story-sends-inherited-due-date ()
   "An existing story with no due date is PUT with the one it inherits."
-  (let ((put-payloads nil))
+  (let ((requests nil))
     (org-tickets-test--with-sync-mocks
-        (lambda (method endpoint callback &optional data)
-          (pcase method
-            ("GET" (funcall callback (org-tickets-test--make-get-response) nil))
-            ("PUT" (when (string-suffix-p "P-2" endpoint)
-                     (push data put-payloads))
-             (funcall callback nil nil))))
+        (org-tickets-test--fake-jira-handler :log requests)
       (with-temp-buffer
         (org-mode)
-        (org-tickets-test--insert-feature "Feature" "P-1")
-        (org-entry-put (point) "DUE_DATE" "2026-08-01")
-        (goto-char (point-max))
+        (org-tickets-test--insert-feature "Feature" "P-1" "DUE_DATE" "2026-08-01")
         (org-tickets-test--insert-story "Story" "P-2" nil)
         (org-tickets-test--run-sync)))
-    (should (= 1 (length put-payloads)))
-    (should (equal (org-tickets-test--payload-due-date (car put-payloads))
-                   "2026-08-01"))))
+    (let ((puts (org-tickets-test--requests requests "PUT" "/rest/api/3/issue/P-2")))
+      (should (= 1 (length puts)))
+      (should (equal (org-tickets-test--payload-due-date (nth 2 (car puts)))
+                     "2026-08-01")))))
 
 (ert-deftest org-tickets-test--jira-due-date-wins-over-parent-inheritance ()
   "A due date already set in Jira is not replaced by the parent's."
   (org-tickets-test--with-sync-mocks
-      (lambda (method endpoint callback &optional _data)
-        (pcase method
-          ("GET" (funcall callback
-                          (org-tickets-test--make-get-response
-                           nil (and (string-suffix-p "P-2" endpoint) "2026-07-15"))
-                          nil))
-          ("PUT" (funcall callback nil nil))))
+      (org-tickets-test--fake-jira-handler
+       :get (lambda (endpoint)
+              (org-tickets-test--make-get-response
+               nil (and (string-suffix-p "P-2" endpoint) "2026-07-15"))))
     (with-temp-buffer
       (org-mode)
-      (org-tickets-test--insert-feature "Feature" "P-1")
-      (org-entry-put (point) "DUE_DATE" "2026-08-01")
-      (goto-char (point-max))
+      (org-tickets-test--insert-feature "Feature" "P-1" "DUE_DATE" "2026-08-01")
       (org-tickets-test--insert-story "Story" "P-2" nil)
       (org-tickets-test--run-sync)
       (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-07-15")))))
@@ -272,24 +247,19 @@ from Jira in phase 1 (its ticket struct still has no key)."
 `org-tickets--inherit-fix-version' existed but was never called from
 anywhere, so a story synced without a FIX_VERSION got none -- in org or
 in Jira -- while `org-tickets-insert-story-template' documented otherwise."
-  (let ((post-payloads nil))
+  (let ((requests nil))
     (org-tickets-test--with-sync-mocks
-        (lambda (method _endpoint callback &optional data)
-          (pcase method
-            ("GET" (funcall callback (org-tickets-test--make-get-response) nil))
-            ("PUT" (funcall callback nil nil))
-            ("POST" (push data post-payloads)
-             (funcall callback (org-tickets-test--json "{\"key\": \"P-2\"}") nil))))
+        (org-tickets-test--fake-jira-handler :post-keys '("P-2") :log requests)
       (with-temp-buffer
         (org-mode)
-        (org-tickets-test--insert-feature "Feature" "P-1")
-        (org-entry-put (point) "FIX_VERSION" "Aug2026")
-        (org-tickets-test--insert-child "New Story" "Story")
+        (org-tickets-test--insert-feature "Feature" "P-1" "FIX_VERSION" "Aug2026")
+        (org-tickets-test--insert-story "New Story" nil nil)
         (org-tickets-test--run-sync)
         (should (equal (org-tickets-test--prop-of "P-2" "FIX_VERSION") "Aug2026"))))
-    (should (= 1 (length post-payloads)))
-    (should (equal (org-tickets-test--payload-fix-version (car post-payloads))
-                   "Aug2026"))))
+    (let ((posts (org-tickets-test--requests requests "POST" "/rest/api/3/issue")))
+      (should (= 1 (length posts)))
+      (should (equal (org-tickets-test--payload-fix-version (nth 2 (car posts)))
+                     "Aug2026")))))
 
 ;;;; Ticket types other than Story are children too
 
@@ -336,14 +306,9 @@ in Jira -- while `org-tickets-insert-story-template' documented otherwise."
 Phase 1 used to fire a features batch and then a STORIES batch, so a
 ticket that was neither -- a Task, a Bug -- was silently dropped: never
 created in Jira, yet the sync reported success."
-  (let ((created nil))
+  (let ((requests nil))
     (org-tickets-test--with-sync-mocks
-        (lambda (method _endpoint callback &optional data)
-          (pcase method
-            ("GET" (funcall callback (org-tickets-test--make-get-response) nil))
-            ("PUT" (funcall callback nil nil))
-            ("POST" (push (cdr (assq 'summary (cdr (assq 'fields data)))) created)
-             (funcall callback (org-tickets-test--json "{\"key\": \"P-9\"}") nil))))
+        (org-tickets-test--fake-jira-handler :post-keys '("P-9") :log requests)
       (let ((org-tickets--issue-type-ids
              (list (cons "Feature" "10000") (cons "New Feature" "10000")
                    (cons "Story" "10001") (cons "Task" "10002")
@@ -352,10 +317,14 @@ created in Jira, yet the sync reported success."
           (org-mode)
           ;; Feature has no key, which selects the sequential path.
           (org-tickets-test--insert-feature "New Feature" nil)
-          (org-tickets-test--insert-child "A Task" "Task")
-          (org-tickets-test--insert-child "A Bug" "Bug")
+          (org-tickets-test--insert-ticket 2 "A Task" "JIRA_TYPE" "Task")
+          (org-tickets-test--insert-ticket 2 "A Bug" "JIRA_TYPE" "Bug")
           (org-tickets-test--run-sync))))
-    (should (equal (sort created #'string<)
+    (should (equal (sort (mapcar (lambda (request)
+                                   (org-tickets-test--payload-field (nth 2 request) 'summary))
+                                 (org-tickets-test--requests
+                                  requests "POST" "/rest/api/3/issue"))
+                         #'string<)
                    '("A Bug" "A Task" "New Feature")))))
 
 ;;;; Custom issue types are children too
@@ -449,34 +418,17 @@ parent link; a type org-tickets has never heard of must not repeat it."
 
 ;;;; org-tickets-create-story
 
-(defmacro org-tickets-test--capturing-create-story (requests &rest body)
-  "Run BODY with Jira requests stubbed; push each (METHOD ENDPOINT DATA) onto REQUESTS.
-Every request answers with the new issue key P-9."
-  (declare (indent 1))
-  `(org-tickets-test--with-stubs
-       ((org-tickets--ensure-issue-types #'ignore)
-        (org-tickets--api-request
-         (lambda (method endpoint &optional data)
-           (push (list method endpoint data) ,requests)
-           (org-tickets-test--json "{\"key\": \"P-9\"}"))))
-     (let ((org-tickets-default-sprint nil)
-           (org-tickets-project-id "12345")
-           (org-tickets--issue-type-ids '(("Story" . "10001"))))
-       ,@body)))
-
 (defun org-tickets-test--created-issue-payload (requests)
-  "Return the data of the single issue-create POST among REQUESTS."
-  (let ((posts (seq-filter (lambda (r)
-                             (and (equal (nth 0 r) "POST")
-                                  (equal (nth 1 r) "/rest/api/3/issue")))
-                           requests)))
+  "Return the data of the single issue-create POST in the REQUESTS log."
+  (let ((posts (org-tickets-test--requests requests "POST" "/rest/api/3/issue")))
     (should (= 1 (length posts)))
     (nth 2 (car posts))))
 
 (ert-deftest org-tickets-test--create-story-sends-feature-due-date ()
   "A story created under an in-buffer feature is POSTed with its due date."
   (let ((requests nil))
-    (org-tickets-test--capturing-create-story requests
+    (org-tickets-test--with-fake-api
+        (org-tickets-test--fake-jira-handler :post-keys '("P-9") :log requests)
       (with-temp-buffer
         (org-mode)
         (insert "* Feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
@@ -489,7 +441,8 @@ Every request answers with the new issue key P-9."
 (ert-deftest org-tickets-test--create-story-under-feature-not-in-buffer ()
   "A feature absent from the buffer is read from Jira, and the story is inserted."
   (let ((requests nil))
-    (org-tickets-test--capturing-create-story requests
+    (org-tickets-test--with-fake-api
+        (org-tickets-test--fake-jira-handler :post-keys '("P-9") :log requests)
       (org-tickets-test--with-stubs
           ((org-tickets--get-ticket
             (lambda (_key)

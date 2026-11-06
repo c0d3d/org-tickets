@@ -400,11 +400,7 @@ description and keeps its own."
 (defun org-tickets-test--synced-descriptions (setup)
   "Sync a buffer prepared by SETUP; return descriptions sent to Jira."
   (let ((descs nil))
-    (org-tickets-test--with-sync-mocks
-        (lambda (method _endpoint callback &optional _data)
-          (funcall callback
-                   (when (string= method "GET") (org-tickets-test--make-get-response))
-                   nil))
+    (org-tickets-test--with-sync-mocks nil
       (org-tickets-test--with-stubs
           ((org-tickets--build-adf-description
             (lambda (desc _atts) (push desc descs) nil)))

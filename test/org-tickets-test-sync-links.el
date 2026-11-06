@@ -79,19 +79,14 @@ BLOCKS: PROJ-200 in its org properties."
   "Test that org-tickets--async-create-link sends inwardIssue=blocker, outwardIssue=blocked.
 In the Jira POST API, inwardIssue is the blocker and outwardIssue is the blocked.
 This matches the GET response where outwardIssue on ticket X means X blocks it."
-  (let ((captured-data nil))
+  (let ((requests nil))
     (org-tickets-test--with-stubs ((org-tickets--async-request
-                                 (lambda (_method _endpoint callback &optional data)
-                                   (setq captured-data data)
-                                   (funcall callback nil nil))))
-      (org-tickets--async-create-link "PROJ-100" "PROJ-200" "Blocks"
-                                   (lambda (_r _e) nil))
-      ;; PROJ-100 is the blocker (inwardIssue in POST)
-      ;; PROJ-200 is the blocked (outwardIssue in POST)
-      (let ((outward (cdr (assoc "outwardIssue" captured-data)))
-            (inward (cdr (assoc "inwardIssue" captured-data))))
-        (should (string= (cdr (assoc "key" inward)) "PROJ-100"))
-        (should (string= (cdr (assoc "key" outward)) "PROJ-200"))))))
+                                 (org-tickets-test--fake-jira-handler :log requests)))
+      (org-tickets--async-create-link "PROJ-100" "PROJ-200" "Blocks" #'ignore))
+    ;; PROJ-100 is the blocker (inwardIssue in POST)
+    ;; PROJ-200 is the blocked (outwardIssue in POST)
+    (should (equal (org-tickets-test--logged-links requests)
+                   '(("PROJ-100" "PROJ-200" "Blocks"))))))
 
 (ert-deftest org-tickets-test--sync-ticket-links-handles-blocked-by ()
   "Test that async-sync-ticket-links creates links from BLOCKED-BY relationships.
@@ -125,113 +120,59 @@ BLOCKS: PROJ-200), sync should still create a Blocks link from PROJ-100 to PROJ-
           (should callback-called)
           (should (member (list "PROJ-100" "PROJ-200" "Blocks") created-links)))))))
 
+(defun org-tickets-test--synced-links (&rest tickets)
+  "Sync TICKETS through the real link code; return the links POSTed.
+Each of TICKETS is an argument list for `org-tickets-test--insert-ticket'.
+Only the HTTP layer is faked, and phase 3's BLOCKED-BY write-back is
+disabled so the links come from the parsed tickets alone."
+  (let ((requests nil))
+    (org-tickets-test--with-sync-mocks
+        (org-tickets-test--fake-jira-handler :log requests)
+        :real (org-tickets--async-sync-ticket-links)
+      (org-tickets-test--with-stubs ((org-tickets--resolve-blocked-by-in-org #'ignore))
+        (with-temp-buffer
+          (org-mode)
+          (dolist (ticket tickets)
+            (apply #'org-tickets-test--insert-ticket ticket))
+          (org-tickets-test--run-sync))))
+    (org-tickets-test--logged-links requests)))
+
 (ert-deftest org-tickets-test--sync-links-for-features ()
   "Test that link sync runs for features, not just stories.
 If Feature PROJ-100 has BLOCKED-BY: PROJ-300, that link should be synced."
-  (let ((created-links nil))
-    (org-tickets-test--with-stubs ((org-tickets--api-request
-                                 (lambda (_method _endpoint _data) nil))
-                                (org-tickets--async-create-link
-                                 (lambda (from-key to-key link-type callback)
-                                   (push (list from-key to-key link-type) created-links)
-                                   (funcall callback nil nil)))
-                                (org-tickets--resolve-config #'ignore)
-                                (org-tickets--ensure-issue-types #'ignore)
-                                (org-tickets--clear-sprint-cache #'ignore)
-                                (org-tickets--async-request
-                                 (lambda (method endpoint callback &optional data)
-                                   (funcall callback
-                                            (org-tickets-test--json "{\"fields\": {\"attachment\": null, \"customfield_10020\": null, \"duedate\": null}}")
-                                            nil)))
-                                (org-tickets--async-upload-attachments
-                                 (lambda (_key _atts callback) (funcall callback nil nil)))
-                                (org-tickets--async-download-attachments
-                                 (lambda (_key _atts callback) (funcall callback nil nil)))
-                                (org-tickets--resolve-blocked-by-in-org #'ignore))
-      (with-temp-buffer
-        (insert "* Feature A
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-100
-:BLOCKED-BY: PROJ-300
-:END:
-* Feature B
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-300
-:END:
-")
-        (org-mode)
-        (org-tickets--sync-to-jira)
-        ;; Should create a "Blocks" link from PROJ-300 (blocker) to PROJ-100 (blocked)
-        (should (member (list "PROJ-300" "PROJ-100" "Blocks") created-links))))))
+  (let ((links (org-tickets-test--synced-links
+                '(1 "Feature A" "JIRA_TYPE" "New Feature" "JIRA_KEY" "PROJ-100"
+                    "BLOCKED-BY" "PROJ-300")
+                '(1 "Feature B" "JIRA_TYPE" "New Feature" "JIRA_KEY" "PROJ-300"))))
+    ;; Should create a "Blocks" link from PROJ-300 (blocker) to PROJ-100 (blocked)
+    (should (member (list "PROJ-300" "PROJ-100" "Blocks") links))))
 
 (ert-deftest org-tickets-test--sync-creates-links-without-buffer-resolution ()
   "Test that full sync creates correct links even when BLOCKS is empty in buffer.
 This verifies the sync path works from struct data alone, not buffer mutations."
-  (let ((created-links nil))
-    (org-tickets-test--with-stubs ((org-tickets--api-request
-                                 (lambda (_method _endpoint _data) nil))
-                                (org-tickets--async-create-link
-                                 (lambda (from-key to-key link-type callback)
-                                   (push (list from-key to-key link-type) created-links)
-                                   (funcall callback nil nil)))
-                                (org-tickets--resolve-config #'ignore)
-                                (org-tickets--ensure-issue-types #'ignore)
-                                (org-tickets--clear-sprint-cache #'ignore)
-                                (org-tickets--async-request
-                                 (lambda (method endpoint callback &optional data)
-                                   (funcall callback
-                                            (org-tickets-test--json "{\"fields\": {\"attachment\": null, \"customfield_10020\": null, \"duedate\": null}}")
-                                            nil)))
-                                (org-tickets--async-upload-attachments
-                                 (lambda (_key _atts callback) (funcall callback nil nil)))
-                                (org-tickets--async-download-attachments
-                                 (lambda (_key _atts callback) (funcall callback nil nil)))
-                                (org-tickets--resolve-blocked-by-in-org #'ignore))
-      (with-temp-buffer
-        (insert "* Parent Feature
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-100
-:END:
-** Story A
-:PROPERTIES:
-:JIRA_TYPE: Story
-:JIRA_KEY: PROJ-200
-:BLOCKED-BY: PROJ-100
-:END:
-** Story B
-:PROPERTIES:
-:JIRA_TYPE: Story
-:JIRA_KEY: PROJ-300
-:BLOCKS: PROJ-200
-:END:
-")
-        (org-mode)
-        (org-tickets--sync-to-jira)
-        ;; BLOCKED-BY: PROJ-200 blocked by PROJ-100 → link PROJ-100 blocks PROJ-200
-        (should (member (list "PROJ-100" "PROJ-200" "Blocks") created-links))
-        ;; BLOCKS: PROJ-300 blocks PROJ-200
-        (should (member (list "PROJ-300" "PROJ-200" "Blocks") created-links))))))
+  (let ((links (org-tickets-test--synced-links
+                '(1 "Parent Feature" "JIRA_TYPE" "New Feature" "JIRA_KEY" "PROJ-100")
+                '(2 "Story A" "JIRA_TYPE" "Story" "JIRA_KEY" "PROJ-200"
+                    "BLOCKED-BY" "PROJ-100")
+                '(2 "Story B" "JIRA_TYPE" "Story" "JIRA_KEY" "PROJ-300"
+                    "BLOCKS" "PROJ-200"))))
+    ;; BLOCKED-BY: PROJ-200 blocked by PROJ-100 → link PROJ-100 blocks PROJ-200
+    (should (member (list "PROJ-100" "PROJ-200" "Blocks") links))
+    ;; BLOCKS: PROJ-300 blocks PROJ-200
+    (should (member (list "PROJ-300" "PROJ-200" "Blocks") links))))
 
 (ert-deftest org-tickets-test--create-link-inward-is-blocker ()
   "Regression: inwardIssue must be the blocker, outwardIssue the blocked.
 This matches GET semantics: viewing ticket X with outwardIssue=Y means X blocks Y.
 So if A blocks B: inwardIssue=A, outwardIssue=B."
-  (let ((captured-data nil))
+  (let ((requests nil))
     (org-tickets-test--with-stubs ((org-tickets--async-request
-                                 (lambda (_method _endpoint callback &optional data)
-                                   (setq captured-data data)
-                                   (funcall callback nil nil))))
-      (org-tickets--async-create-link "BLOCKER-1" "BLOCKED-2" "Blocks"
-                                   (lambda (_r _e) nil))
-      (let ((outward (cdr (assoc "outwardIssue" captured-data)))
-            (inward (cdr (assoc "inwardIssue" captured-data))))
-        ;; inwardIssue = the blocker
-        (should (string= (cdr (assoc "key" inward)) "BLOCKER-1"))
-        ;; outwardIssue = the blocked
-        (should (string= (cdr (assoc "key" outward)) "BLOCKED-2"))))))
+                                 (org-tickets-test--fake-jira-handler :log requests)))
+      (org-tickets--async-create-link "BLOCKER-1" "BLOCKED-2" "Blocks" #'ignore))
+    ;; inwardIssue = the blocker, outwardIssue = the blocked
+    (let ((data (nth 2 (car requests))))
+      (should (string= (cdr (assoc "key" (cdr (assoc "inwardIssue" data)))) "BLOCKER-1"))
+      (should (string= (cdr (assoc "key" (cdr (assoc "outwardIssue" data)))) "BLOCKED-2")))))
 
 (ert-deftest org-tickets-test--external-parent-creates-blocks-link ()
   "Test that a Story with PARENT referencing an external ticket creates a Blocks link.
