@@ -113,7 +113,7 @@ Pattern:
 ```
 
 ### Pre-creation attachments
-Files can be attached to headings before they have a `JIRA_KEY`. The `org-tickets--ensure-org-attach-id-for-current-heading` function creates an `:ID:` for the heading so org-attach can manage files. When the ticket is later created during sync, the files are uploaded automatically.
+Files can be attached to headings before they have a `JIRA_KEY`. `org-id-get-create` creates an `:ID:` for the heading so org-attach can manage files. When the ticket is later created during sync, the files are uploaded automatically.
 
 ## Duplicate Filenames
 

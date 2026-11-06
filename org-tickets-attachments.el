@@ -80,14 +80,20 @@ signed media URL).  HOPS counts redirects followed so far.  CALLBACK is
            (`(:error ,msg) (funcall callback nil msg)))))
      nil t)))
 
+(defun org-tickets--local-attachment-current-p (path size)
+  "Return non-nil when file PATH exists with exactly SIZE bytes.
+A nil SIZE never matches."
+  (and size
+       (file-exists-p path)
+       (= (file-attribute-size (file-attributes path)) size)))
+
 (defun org-tickets--async-download-attachment (url filename dir size callback)
   "Asynchronously download attachment from URL to FILENAME in DIR.
 SIZE is the expected file size from Jira metadata.  If a local file
 exists with matching name and size, the download is skipped.
 CALLBACK is (lambda (path err) ...) called on completion."
   (let ((local-path (expand-file-name filename dir)))
-    (if (and (file-exists-p local-path)
-             (= (file-attribute-size (file-attributes local-path)) size))
+    (if (org-tickets--local-attachment-current-p local-path size)
         (progn
           (when org-tickets-debug
             (message "org-tickets: Skipping download, local file matches: %s" filename))
@@ -182,88 +188,70 @@ orders them correctly."
           (puthash name att seen))))
     (hash-table-values seen)))
 
+(defun org-tickets--download-thunks (attachments attach-dir)
+  "Return async thunks downloading each of ATTACHMENTS into ATTACH-DIR.
+Duplicate filenames are collapsed to the newest, and files already
+current locally are skipped."
+  (mapcar
+   (lambda (att)
+     (let ((filename (org-tickets--attachment-filename att))
+           (url (org-tickets--attachment-content-url att))
+           (size (or (org-tickets--alist-get "size" att) 0)))
+       (lambda (done)
+         (org-tickets--async-download-attachment
+          url filename attach-dir size done))))
+   (seq-remove
+    (lambda (att)
+      (org-tickets--local-attachment-current-p
+       (expand-file-name (org-tickets--attachment-filename att) attach-dir)
+       (org-tickets--alist-get "size" att)))
+    (org-tickets--dedup-attachments-by-filename attachments))))
+
 (defun org-tickets--async-download-attachments (ticket-key attachments callback)
   "Asynchronously download ATTACHMENTS from Jira for TICKET-KEY.
 ATTACHMENTS is a list of attachment metadata alists from Jira.
 Skips files that exist locally with matching filename and size.
 CALLBACK is (lambda (results err) ...) called when all downloads finish."
-  (catch 'org-tickets--download-done
-    (unless attachments
-      (funcall callback nil nil)
-      (throw 'org-tickets--download-done nil))
-    (save-excursion
-      (let ((pos (org-tickets--find-ticket-by-key ticket-key)))
-        (unless pos
-          (funcall callback nil nil)
-          (throw 'org-tickets--download-done nil))
+  (let ((pos (and attachments (org-tickets--find-ticket-by-key ticket-key))))
+    (if (not pos)
+        (funcall callback nil nil)
+      (save-excursion
         (goto-char pos)
-        (org-tickets--ensure-org-attach-id ticket-key)
-        (let* ((attach-dir (org-tickets--get-ticket-attach-dir t))
-               (deduped (org-tickets--dedup-attachments-by-filename attachments))
-               (to-download
-                (seq-remove
-                 (lambda (att)
-                   (let* ((filename (org-tickets--attachment-filename att))
-                          (size (org-tickets--alist-get "size" att))
-                          (local-path (expand-file-name filename attach-dir)))
-                     (and (file-exists-p local-path)
-                          size
-                          (= (file-attribute-size (file-attributes local-path))
-                             size))))
-                 deduped))
-               (thunks
-                (mapcar
-                 (lambda (att)
-                   (let ((filename (org-tickets--attachment-filename att))
-                         (url (org-tickets--attachment-content-url att))
-                         (size (or (org-tickets--alist-get "size" att) 0)))
-                     (lambda (done)
-                       (org-tickets--async-download-attachment
-                        url filename attach-dir size done))))
-                 to-download)))
-          (if (null thunks)
-              (funcall callback nil nil)
-            (org-tickets--async-batch
-             thunks
-             (lambda (results) (funcall callback results nil)))))))))
+        (org-id-get-create)
+        (org-tickets--async-batch
+         (org-tickets--download-thunks
+          attachments (org-tickets--get-ticket-attach-dir t))
+         (lambda (results) (funcall callback results nil)))))))
 
 ;;;; Async Batch Upload
+
+(defun org-tickets--upload-thunks (ticket-key dir jira-attachments)
+  "Return async thunks uploading files in DIR missing from JIRA-ATTACHMENTS.
+Each thunk uploads one file to TICKET-KEY."
+  (let ((jira-filenames (mapcar #'org-tickets--attachment-filename
+                                jira-attachments)))
+    (mapcar
+     (lambda (file)
+       (let ((file-path (expand-file-name file dir)))
+         (lambda (done)
+           (org-tickets--async-upload-attachment ticket-key file-path done))))
+     (seq-remove (lambda (f) (member f jira-filenames))
+                 (org-attach-file-list dir)))))
 
 (defun org-tickets--async-upload-attachments (ticket-key jira-attachments callback)
   "Asynchronously upload local attachments for TICKET-KEY to Jira.
 JIRA-ATTACHMENTS is the attachment list from Jira (used for dedup by filename).
 Does NOT re-fetch attachment metadata from Jira.
 CALLBACK is (lambda (results err) ...) called when all uploads finish."
-  (catch 'org-tickets--upload-done
-    (save-excursion
-      (let ((pos (org-tickets--find-ticket-by-key ticket-key)))
-        (unless pos
-          (funcall callback nil nil)
-          (throw 'org-tickets--upload-done nil))
-        (goto-char pos)
-        (let ((dir (org-tickets--get-ticket-attach-dir nil)))
-          (unless dir
-            (funcall callback nil nil)
-            (throw 'org-tickets--upload-done nil))
-          (let* ((local-files (org-attach-file-list dir))
-                 (jira-filenames (mapcar #'org-tickets--attachment-filename
-                                         jira-attachments))
-                 (to-upload (seq-remove
-                             (lambda (f) (member f jira-filenames))
-                             local-files))
-                 (thunks
-                  (mapcar
-                   (lambda (file)
-                     (let ((file-path (expand-file-name file dir)))
-                       (lambda (done)
-                         (org-tickets--async-upload-attachment
-                          ticket-key file-path done))))
-                   to-upload)))
-            (if (null thunks)
-                (funcall callback nil nil)
-              (org-tickets--async-batch
-               thunks
-               (lambda (results) (funcall callback results nil))))))))))
+  (let* ((pos (org-tickets--find-ticket-by-key ticket-key))
+         (dir (and pos (save-excursion
+                         (goto-char pos)
+                         (org-tickets--get-ticket-attach-dir nil)))))
+    (if (not dir)
+        (funcall callback nil nil)
+      (org-tickets--async-batch
+       (org-tickets--upload-thunks ticket-key dir jira-attachments)
+       (lambda (results) (funcall callback results nil))))))
 
 ;;;; Attachment Management
 
@@ -280,12 +268,10 @@ Returns a list of attachment metadata alists with keys:
 Note: The Jira Cloud REST API v3 does not support GET on the
 /rest/api/3/issue/{issueIdOrKey}/attachments endpoint (returns 405).
 Instead, we fetch the issue with fields=attachment to get attachment metadata."
-  (let* ((response (org-tickets--api-request "GET"
-                                          (concat "/rest/api/3/issue/" ticket-key "?fields=attachment"))))
-    ;; Extract attachment field from the issue response
-    ;; Response structure: { \"fields\": { \"attachment\": [...] } }
-    (when response
-      (org-tickets--response-field response "attachment"))))
+  (org-tickets--response-field
+   (org-tickets--api-request
+    "GET" (concat "/rest/api/3/issue/" ticket-key "?fields=attachment"))
+   "attachment"))
 
 (defun org-tickets--attachment-filename (attachment)
   "Get filename from ATTACHMENT metadata alist."
@@ -307,34 +293,20 @@ Uses org-attach to manage the attachment directory."
   (let ((org-attach-use-inheritance nil))
     (org-attach-dir create-if-not-exists)))
 
-(defun org-tickets--ensure-org-attach-id (ticket-key)
-  "Ensure the org heading for TICKET-KEY has an ID property for org-attach.
-Creates an ID if needed and returns the ID property value."
-  (save-excursion
-    (let ((pos (org-tickets--find-ticket-by-key ticket-key)))
-      (when pos
-        (goto-char pos)
-        (let ((existing-id (org-entry-get (point) "ID")))
-          (unless existing-id
-            (org-id-get-create))
-          (org-entry-get (point) "ID"))))))
-
-(defun org-tickets--ensure-org-attach-id-for-current-heading ()
-  "Ensure the current org heading has an ID property for org-attach.
-This function works on the current heading without requiring a JIRA_KEY.
-It returns the existing ID if one is present, or creates one if needed.
-This enables attaching files to tickets that don't exist in Jira yet -
-the files will be uploaded when the ticket is created during sync."
-  (let ((existing-id (org-entry-get (point) "ID")))
-    (unless existing-id
-      (org-id-get-create))
-    (org-entry-get (point) "ID")))
+(defun org-tickets--attachment-names (ticket-key)
+  "Return (LOCAL . REMOTE) attachment filename lists for TICKET-KEY.
+LOCAL comes from the org-attach directory of the heading at point and
+REMOTE from Jira."
+  (let ((dir (org-tickets--get-ticket-attach-dir nil)))
+    (cons (and dir (org-attach-file-list dir))
+          (mapcar #'org-tickets--attachment-filename
+                  (org-tickets--get-attachments ticket-key)))))
 
 (defun org-tickets--delete-attachment (ticket-key attachment-id)
   "Delete an attachment from Jira.
 TICKET-KEY is the ticket key.
 ATTACHMENT-ID is the Jira attachment ID to delete.
-Returns t on success, signals error on failure."
+Returns nil on success; signals on failure."
   (org-tickets--api-request "DELETE"
                          (concat "/rest/api/3/issue/" ticket-key "/attachments/" attachment-id)))
 

@@ -76,23 +76,6 @@
 
 ;;;; Tests for Pre-Creation Attachments
 
-(ert-deftest org-tickets-test--ensure-org-attach-id-for-current-heading-returns-existing ()
-  "Test that org-tickets--ensure-org-attach-id-for-current-heading returns existing ID."
-  (let ((content "* Test
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:ID:       12345678-1234-1234-1234-123456789012
-:END:
-"))
-    (with-temp-buffer
-      (insert content)
-      (org-mode)
-      (goto-char (point-min))
-      (re-search-forward "^\\* Test" nil t)
-      (should (string= (org-entry-get (point) "ID" "inherit") "12345678-1234-1234-1234-123456789012"))
-      (let ((id (org-tickets--ensure-org-attach-id-for-current-heading)))
-        (should (string= id "12345678-1234-1234-1234-123456789012"))))))
-
 (ert-deftest org-tickets-test--attach-add-without-jira-key-logic ()
   "Test the logic flow for org-tickets-attach-add without JIRA_KEY."
   (let ((content "* Test Feature
@@ -111,36 +94,6 @@ Description here.
         (should elem)
         (should (eq (org-element-type elem) 'headline))))))
 
-(ert-deftest org-tickets-test--attach-add-with-jira-key-still-works ()
-  "Test that org-tickets-attach-add still works when JIRA_KEY is present."
-  (let ((content "* Test Feature
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-100
-:ID:       12345678-1234-1234-1234-123456789012
-:END:
-Description here.
-"))
-    (with-temp-buffer
-      (insert content)
-      (org-mode)
-      (goto-char (point-min))
-      (re-search-forward "^\\* Test Feature" nil t)
-      (should (string= (org-entry-get (point) "JIRA_KEY") "PROJ-100"))
-      (should (org-entry-get (point) "ID" 'inherit))
-      (let ((id (org-tickets--ensure-org-attach-id-for-current-heading)))
-        (should id)
-        (should (stringp id))))))
-
-(ert-deftest org-tickets-test--ensure-org-attach-id-function-exists ()
-  "Test that org-tickets--ensure-org-attach-id-for-current-heading exists."
-  (should (fboundp 'org-tickets--ensure-org-attach-id-for-current-heading))
-  (let ((doc (documentation 'org-tickets--ensure-org-attach-id-for-current-heading)))
-    (should doc)
-    (should (string-match-p "current heading" doc))
-    (should (string-match-p "without requiring" doc))
-    (should (string-match-p "JIRA_KEY" doc))))
-
 (ert-deftest org-tickets-test--attach-add-message-without-jira-key ()
   "Test that org-tickets-attach-add shows appropriate message without JIRA_KEY."
   (should (fboundp 'org-tickets-attach-add))
@@ -150,14 +103,14 @@ Description here.
     (should (string-match-p "before syncing to Jira" doc))
     (should (string-match-p "uploaded when the ticket is created" doc))))
 
-(ert-deftest org-tickets-test--ensure-org-attach-id-no-inheritance ()
-  "Test that ensure-org-attach-id does NOT inherit ID from parent heading.
-Regression test: previously used (org-entry-get (point) \"ID\" 'inherit)
-which caused child tickets to share the parent's attachment directory,
-resulting in parent attachments being uploaded to child Jira tickets."
+(ert-deftest org-tickets-test--attach-open-does-not-inherit-parent-id ()
+  "attach-open gives a child ticket its own ID instead of the parent's.
+Regression test: inheriting the parent's ID made child tickets share the
+parent's attachment directory, uploading parent files to child tickets."
   (with-temp-buffer
     (org-mode)
-    (setq buffer-file-name (expand-file-name "inherit-test.org" temporary-file-directory))
+    (setq buffer-file-name
+          (expand-file-name "inherit-test.org" temporary-file-directory))
     (insert "* Parent Feature
 :PROPERTIES:
 :JIRA_TYPE: New Feature
@@ -172,8 +125,10 @@ resulting in parent attachments being uploaded to child Jira tickets."
 ")
     (goto-char (point-min))
     (re-search-forward "PROJ-200")
-    (let* ((org-id-track-globally nil)
-           (child-id (org-tickets--ensure-org-attach-id-for-current-heading)))
+    (let ((org-id-track-globally nil))
+      (org-tickets-test--with-stubs ((org-attach-reveal #'ignore))
+        (org-tickets-attach-open)))
+    (let ((child-id (org-entry-get (point) "ID")))
       (should child-id)
       (should-not (string= child-id "parent-uuid-1234")))))
 

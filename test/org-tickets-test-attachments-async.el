@@ -246,8 +246,8 @@ url.el sends the file bytes unchanged."
                                          (funcall callback (expand-file-name filename dir) nil)))
                                       (org-tickets--find-ticket-by-key
                                        (lambda (_key) (point)))
-                                      (org-tickets--ensure-org-attach-id
-                                       (lambda (_key) "fake-id"))
+                                      (org-id-get-create
+                                       (lambda (&rest _) "fake-id"))
                                       (org-tickets--get-ticket-attach-dir
                                        (lambda (_create) temp-dir)))
             (with-temp-buffer

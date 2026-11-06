@@ -35,14 +35,6 @@
 ;;;; Setup and Configuration
 
 ;;;###autoload
-(defun org-tickets-setup (jira-url project-key)
-  "Configure org-tickets with JIRA-URL and PROJECT-KEY.
-Credentials are fetched from authinfo on first use, not passed here."
-  (setopt org-tickets-base-url jira-url
-          org-tickets-project-key project-key)
-  (message "org-tickets: Config updated. Credentials will be fetched from authinfo on first use."))
-
-;;;###autoload
 (defun org-tickets-refresh-issue-types ()
   "Force refresh of issue type IDs from Jira."
   (interactive)
@@ -136,7 +128,7 @@ Uses org-attach to manage the attachment locally."
   (org-tickets--at-ticket-heading
     (let ((heading-key (org-entry-get (point) "JIRA_KEY")))
       ;; Ensure we have an ID for org-attach - works even without a JIRA_KEY
-      (org-tickets--ensure-org-attach-id-for-current-heading)
+      (org-id-get-create)
       ;; Use org-attach to add the file
       (org-attach-attach file nil 'cp)
       (if heading-key
@@ -153,10 +145,9 @@ Uses org-attach to manage the attachment locally."
     (let ((heading-key (org-entry-get (point) "JIRA_KEY")))
       (unless heading-key
         (user-error "No JIRA_KEY property on this heading"))
-      (let* ((local-dir (org-tickets--get-ticket-attach-dir nil))
-             (local-files (and local-dir (org-attach-file-list local-dir)))
-             (remote-files (mapcar #'org-tickets--attachment-filename
-                                   (org-tickets--get-attachments heading-key))))
+      (let* ((names (org-tickets--attachment-names heading-key))
+             (local-files (car names))
+             (remote-files (cdr names)))
         (message "org-tickets: local: %s | jira: %s"
                  (if local-files (mapconcat #'identity local-files ", ") "none")
                  (if remote-files (mapconcat #'identity remote-files ", ") "none"))))))
@@ -169,7 +160,7 @@ heading's ID property, which is created on demand."
   (interactive)
   (require 'org-attach)
   (org-tickets--at-ticket-heading
-    (org-tickets--ensure-org-attach-id-for-current-heading)
+    (org-id-get-create)
     (org-attach-reveal)))
 
 ;;;###autoload
@@ -177,17 +168,13 @@ heading's ID property, which is created on demand."
   "Remove attachment FILENAME from the current heading's ticket.
 Deletes from Jira when the ticket has it there, and from the local
 org-attach directory when present.  Interactively, completes over the
-union of local and Jira attachment names (the old \"f\" spec read an
-absolute path that could never match)."
+union of local and Jira attachment names."
   (interactive
    (list (org-tickets--at-ticket-heading
            (let* ((key (or (org-entry-get (point) "JIRA_KEY")
                            (user-error "No JIRA_KEY property on this heading")))
-                  (dir (org-tickets--get-ticket-attach-dir nil))
-                  (local (and dir (org-attach-file-list dir)))
-                  (remote (mapcar #'org-tickets--attachment-filename
-                                  (org-tickets--get-attachments key)))
-                  (names (delete-dups (append local remote))))
+                  (all (org-tickets--attachment-names key))
+                  (names (delete-dups (append (car all) (cdr all)))))
              (unless names
                (user-error "No attachments found for %s" key))
              (completing-read "Remove attachment: " names nil t)))))
@@ -234,11 +221,15 @@ and you need to sync those changes into your local org buffer."
 
 ;;;; Clipboard Commands
 
-(defun org-tickets--copy-ticket-link-to-clipboard (ticket-key)
-  "Copy Jira ticket link for TICKET-KEY to clipboard."
+(defun org-tickets--browse-url (ticket-key)
+  "Return the Jira browse URL for TICKET-KEY, or signal if no base URL is set."
   (unless org-tickets-base-url
     (user-error "`org-tickets-base-url' is not set; customize it or set it in your init file"))
-  (let* ((url (concat org-tickets-base-url "/browse/" ticket-key)))
+  (concat org-tickets-base-url "/browse/" ticket-key))
+
+(defun org-tickets--copy-ticket-link-to-clipboard (ticket-key)
+  "Copy Jira ticket link for TICKET-KEY to clipboard."
+  (let ((url (org-tickets--browse-url ticket-key)))
     (when (and (fboundp 'gui-set-selection) (display-graphic-p))
       (gui-set-selection 'PRIMARY url))
     (kill-new url)
@@ -257,11 +248,7 @@ and you need to sync those changes into your local org buffer."
 
 (defun org-tickets--insert-ticket-hyperlink (ticket-key)
   "Insert a hyperlink to TICKET-KEY at point."
-  (unless org-tickets-base-url
-    (user-error "`org-tickets-base-url' is not set; customize it or set it in your init file"))
-  (let* ((url (concat org-tickets-base-url "/browse/" ticket-key))
-         (link (format "[[%s][%s]]" url ticket-key)))
-    (insert link)))
+  (insert (format "[[%s][%s]]" (org-tickets--browse-url ticket-key) ticket-key)))
 
 ;;;###autoload
 (defun org-tickets-insert-ticket-link ()
