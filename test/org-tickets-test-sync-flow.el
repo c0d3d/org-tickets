@@ -100,30 +100,24 @@
 (ert-deftest org-tickets-test--all-features-exist-p-true-when-all-have-keys ()
   "all-features-exist-p returns t when every feature has a non-empty JIRA_KEY."
   (let ((doc (org-tickets--doc-create
-              :features (list
+              :tickets (list
                          (org-tickets--ticket-create :key "PROJ-1" :type "Feature")
-                         (org-tickets--ticket-create :key "PROJ-2" :type "Feature"))
-              :children nil
-              :tickets nil)))
+                         (org-tickets--ticket-create :key "PROJ-2" :type "Feature")))))
     (should (org-tickets--all-features-exist-p doc))))
 
 (ert-deftest org-tickets-test--all-features-exist-p-false-when-any-lacks-key ()
   "all-features-exist-p returns nil when any feature has no JIRA_KEY."
   (let ((doc (org-tickets--doc-create
-              :features (list
+              :tickets (list
                          (org-tickets--ticket-create :key "PROJ-1" :type "Feature")
-                         (org-tickets--ticket-create :key nil :type "Feature"))
-              :children nil
-              :tickets nil)))
+                         (org-tickets--ticket-create :key nil :type "Feature")))))
     (should-not (org-tickets--all-features-exist-p doc))))
 
 (ert-deftest org-tickets-test--all-features-exist-p-false-when-key-empty-string ()
   "all-features-exist-p returns nil when any feature has an empty string key."
   (let ((doc (org-tickets--doc-create
-              :features (list
-                         (org-tickets--ticket-create :key "" :type "Feature"))
-              :children nil
-              :tickets nil)))
+              :tickets (list
+                         (org-tickets--ticket-create :key "" :type "Feature")))))
     (should-not (org-tickets--all-features-exist-p doc))))
 
 (ert-deftest org-tickets-test--batching-single-batch-when-all-features-have-keys ()
@@ -512,8 +506,7 @@ last ticket processed would otherwise leave point far from the user's location."
                                 (org-tickets--safe-with-buffer
                                  (lambda (buffer body-fn) (funcall body-fn))))
       ;; Build a fake attachment thunk
-      (let* ((result-plist (list :key "PROJ-1" :attachments '(("a")) :is-new nil))
-             (thunk (org-tickets--make-attachment-thunk
+      (let* ((thunk (org-tickets--make-attachment-thunk
                      "PROJ-1" '(("a")) (current-buffer)))
              (done-result nil))
         (funcall thunk (lambda (r e) (setq done-result t)))

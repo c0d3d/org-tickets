@@ -114,16 +114,7 @@ Blank entries are dropped; an absent or blank property gives nil."
 (defun org-tickets--parse-document ()
   "Parse the current org buffer and return an org-tickets--doc struct."
   (let ((tickets (delq nil (org-map-entries #'org-tickets--parse-ticket-at-point))))
-    (org-tickets--doc-create
-     :tickets tickets
-     :features (seq-filter (lambda (ticket)
-                             (org-tickets--parent-type-p
-                              (org-tickets--ticket-type ticket)))
-                           tickets)
-     :children (seq-filter (lambda (ticket)
-                             (org-tickets--child-type-p
-                              (org-tickets--ticket-type ticket)))
-                           tickets))))
+    (org-tickets--doc-create :tickets tickets)))
 
 (defun org-tickets--doc-non-feature-tickets (doc)
   "Return DOC's tickets that are not features, in document order.

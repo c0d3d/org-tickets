@@ -172,9 +172,8 @@
 
 (ert-deftest org-tickets-test--adf-import-media-inline-as-attachment-link ()
   "Test that mediaInline ADF nodes import as [[attachment:filename]] links."
-  (let* ((org-tickets--adf-attachment-id-map
-          (list (cons "att-uuid-123" "design.pdf")
-                (cons "att-uuid-456" "report.xlsx")))
+  (let* ((id-map (list (cons "att-uuid-123" "design.pdf")
+                       (cons "att-uuid-456" "report.xlsx")))
          (adf (list (cons "type" "doc")
                     (cons "version" 1)
                     (cons "content"
@@ -189,13 +188,12 @@
                                                                     (cons "type" "file"))))
                                                   (list (cons "type" "text")
                                                         (cons "text" " for details"))))))))))
-    (let ((result (org-tickets--parse-adf-description adf)))
+    (let ((result (org-tickets--parse-adf-description adf id-map)))
       (should (string-match-p "\\[\\[attachment:design\\.pdf\\]\\]" result)))))
 
 (ert-deftest org-tickets-test--adf-import-media-single-as-attachment-link ()
   "Test that mediaSingle ADF nodes import as [[attachment:filename]] links when ID is known."
-  (let* ((org-tickets--adf-attachment-id-map
-          (list (cons "abc123" "screenshot.png")))
+  (let* ((id-map (list (cons "abc123" "screenshot.png")))
          (adf (list (cons "type" "doc")
                     (cons "version" 1)
                     (cons "content"
@@ -206,13 +204,12 @@
                                                         (cons "attrs" (list (cons "type" "file")
                                                                             (cons "id" "abc123")
                                                                             (cons "collection" ""))))))))))))
-    (let ((result (org-tickets--parse-adf-description adf)))
+    (let ((result (org-tickets--parse-adf-description adf id-map)))
       (should (string-match-p "\\[\\[attachment:screenshot\\.png\\]\\]" result)))))
 
 (ert-deftest org-tickets-test--adf-import-media-single-unknown-id-fallback ()
   "Test that mediaSingle falls back to [media: id] when attachment ID is unknown."
-  (let* ((org-tickets--adf-attachment-id-map nil)
-         (adf (list (cons "type" "doc")
+  (let* ((adf (list (cons "type" "doc")
                     (cons "version" 1)
                     (cons "content"
                           (list (list (cons "type" "mediaSingle")

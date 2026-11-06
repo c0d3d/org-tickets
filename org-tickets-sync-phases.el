@@ -110,6 +110,16 @@ Also restores point and window scroll to where they were when sync began."
 
 ;;;; Phase 1: Create/Update Tickets
 
+(org-tickets--define-record org-tickets--sync-result
+    "Outcome of one phase-1 ticket create or update."
+  key                               ; Jira key (nil when creation failed)
+  ticket                            ; The org-tickets--ticket synced
+  attachments                       ; Attachment metadata fetched from Jira
+  sprint                            ; Sprint name to write back to org
+  due-date                          ; Due date to write back to org
+  is-new                            ; t when the ticket was just created
+  error)                            ; Error from the request, or nil
+
 (defun org-tickets--fire-ticket-put (ticket key attachments sprint due-date org-buffer done)
   "Fire async PUT for TICKET with KEY and call DONE when complete.
 ATTACHMENTS, SPRINT, DUE-DATE are fetched data from the GET.
@@ -118,9 +128,11 @@ ORG-BUFFER is for progress tracking.  DONE is the batch callback."
          (finish (lambda (err)
                    (org-tickets--safe-with-buffer
                     org-buffer #'org-tickets--progress-increment)
-                   (funcall done (list :key key :attachments attachments
-                                       :sprint sprint :due-date due-date
-                                       :is-new nil :error err)
+                   (funcall done (org-tickets--sync-result-create
+                                   :key key :ticket ticket
+                                   :attachments attachments
+                                   :sprint sprint :due-date due-date
+                                   :is-new nil :error err)
                             nil))))
     (if (null fields)
         (funcall finish nil)
@@ -140,7 +152,9 @@ ORG-BUFFER is the originating buffer for progress tracking."
          (if get-err
              (progn
                (org-tickets--safe-with-buffer org-buffer #'org-tickets--progress-increment)
-               (funcall done (list :key key :error get-err) nil))
+               (funcall done (org-tickets--sync-result-create
+                              :key key :ticket ticket :error get-err)
+                        nil))
            (let ((attachments (org-tickets--issue-attachments get-response))
                  (sprint (org-tickets--issue-sprint get-response))
                  (due-date (org-tickets--issue-due-date get-response)))
@@ -163,10 +177,10 @@ issued as \"Blocks\" links in phase 2 (`org-tickets--async-sync-ticket-links')."
          (org-tickets--safe-with-buffer org-buffer #'org-tickets--progress-increment)
          (let ((new-key (when response
                           (org-tickets--alist-get "key" response))))
-           (funcall done (list :key new-key :is-new t :error err
-                               :sprint (when org-tickets-default-sprint
-                                         (format "%s" org-tickets-default-sprint))
-                               :ticket ticket)
+           (funcall done (org-tickets--sync-result-create
+                          :key new-key :ticket ticket :is-new t :error err
+                          :sprint (when org-tickets-default-sprint
+                                    (format "%s" org-tickets-default-sprint)))
                     nil)))
        (list (cons 'fields fields))))))
 
@@ -212,9 +226,9 @@ the sync reported success."
     (org-tickets--async-batch
      feature-thunks
      (lambda (feature-results)
-       (let ((feature-plists (mapcar #'car feature-results)))
+       (let ((feature-records (mapcar #'car feature-results)))
          (org-tickets--with-writable-buffer org-buffer
-           (org-tickets--apply-new-keys feature-plists))
+           (org-tickets--apply-new-keys feature-records))
          (let ((rest-thunks (mapcar (lambda (tk)
                                       (org-tickets--make-ticket-thunk tk org-buffer))
                                     (org-tickets--doc-non-feature-tickets doc))))
@@ -223,7 +237,7 @@ the sync reported success."
             (lambda (rest-results)
               (org-tickets--sync-phase-2
                doc
-               (append feature-plists
+               (append feature-records
                        (mapcar #'car rest-results))
                org-buffer)))))))))
 
@@ -339,25 +353,19 @@ ORG-BUFFER is the originating buffer."
      (lambda (_results)
        (org-tickets--sync-phase-3 doc phase-1-results org-buffer)))))
 
-(defun org-tickets--phase-1-result-description (doc result)
+(defun org-tickets--phase-1-result-description (result)
   "Return the org description for a phase-1 RESULT's ticket, or nil.
-New tickets carry their struct in the RESULT plist; existing tickets
-are matched by key against DOC's tickets."
-  (let ((ticket (or (plist-get result :ticket)
-                    (let ((key (plist-get result :key)))
-                      (seq-find (lambda (tk)
-                                  (equal (org-tickets--ticket-key tk) key))
-                                (org-tickets--doc-tickets doc))))))
-    (when ticket (org-tickets--ticket-description ticket))))
+Every RESULT carries its ticket."
+  (org-tickets--ticket-description (org-tickets--sync-result-ticket result)))
 
 (defun org-tickets--build-phase-2-thunks (doc phase-1-results org-buffer)
   "Build thunks for phase 2 from DOC, PHASE-1-RESULTS, and ORG-BUFFER."
   (let ((thunks nil))
     ;; Attachment thunks for tickets with keys
     (dolist (result phase-1-results)
-      (let ((key (plist-get result :key))
-            (attachments (plist-get result :attachments))
-            (description (org-tickets--phase-1-result-description doc result)))
+      (let ((key (org-tickets--sync-result-key result))
+            (attachments (org-tickets--sync-result-attachments result))
+            (description (org-tickets--phase-1-result-description result)))
         (when (org-tickets--non-empty-string key)
           (push (org-tickets--make-attachment-thunk key attachments org-buffer
                                                  description)
@@ -413,35 +421,37 @@ BLOCKS property includes the current ticket's key."
 
 (defun org-tickets--apply-new-keys (phase-1-results)
   "Write new JIRA_KEYs onto the headings of newly created tickets.
-PHASE-1-RESULTS is the list of result plists from phase 1."
+PHASE-1-RESULTS is the list of result records from phase 1."
   (dolist (result phase-1-results)
-    (when (plist-get result :is-new)
-      (let ((key (plist-get result :key))
-            (ticket (plist-get result :ticket)))
-        (when (and key ticket)
-          (org-tickets--set-org-ticket-key ticket key))))))
+    (when (org-tickets--sync-result-is-new result)
+      (let ((key (org-tickets--sync-result-key result)))
+        (when key
+          (org-tickets--set-org-ticket-key
+           (org-tickets--sync-result-ticket result) key))))))
 
-(defun org-tickets--apply-plist-updates (phase-1-results prop setter)
-  "Apply PROP from each PHASE-1-RESULTS plist via SETTER.
-For every result carrying both a :key and a non-nil PROP value, calls
+(defun org-tickets--apply-result-updates (phase-1-results accessor setter)
+  "Apply ACCESSOR of each PHASE-1-RESULTS record via SETTER.
+For every result with both a key and a non-nil ACCESSOR value, calls
 SETTER with that key and value."
   (dolist (result phase-1-results)
-    (let ((key (plist-get result :key))
-          (value (plist-get result prop)))
+    (let ((key (org-tickets--sync-result-key result))
+          (value (funcall accessor result)))
       (when (and key value)
         (funcall setter key value)))))
 
 (defun org-tickets--apply-sprint-updates (phase-1-results)
   "Update SPRINT properties from fetched Jira data.
-PHASE-1-RESULTS is the list of result plists from phase 1."
-  (org-tickets--apply-plist-updates phase-1-results :sprint
-                                 #'org-tickets--set-org-sprint))
+PHASE-1-RESULTS is the list of result records from phase 1."
+  (org-tickets--apply-result-updates phase-1-results
+                                     #'org-tickets--sync-result-sprint
+                                     #'org-tickets--set-org-sprint))
 
 (defun org-tickets--apply-due-date-updates (phase-1-results)
   "Update DUE_DATE properties from fetched Jira data.
-PHASE-1-RESULTS is the list of result plists from phase 1."
-  (org-tickets--apply-plist-updates phase-1-results :due-date
-                                 #'org-tickets--set-org-due-date))
+PHASE-1-RESULTS is the list of result records from phase 1."
+  (org-tickets--apply-result-updates phase-1-results
+                                     #'org-tickets--sync-result-due-date
+                                     #'org-tickets--set-org-due-date))
 
 (defun org-tickets--apply-due-date-inheritance (doc)
   "Inherit due dates from parent features to child tickets in DOC.
@@ -462,11 +472,11 @@ buffer is fetched from Jira at most once."
   "Count and log errors from PHASE-1-RESULTS.  Returns the error count."
   (let ((error-count 0))
     (dolist (result phase-1-results)
-      (let ((err (plist-get result :error)))
+      (let ((err (org-tickets--sync-result-error result)))
         (when err
           (setq error-count (1+ error-count))
           (message "org-tickets: Error syncing %s: %s"
-                   (or (plist-get result :key) "unknown") err))))
+                   (or (org-tickets--sync-result-key result) "unknown") err))))
     error-count))
 
 (defun org-tickets--release-ticket-markers (doc)

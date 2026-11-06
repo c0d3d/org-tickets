@@ -288,12 +288,14 @@ sees nested content as belonging to the item."
 
 ;;;; Entry Point
 
-(defun org-tickets--parse-adf-description (adf)
+(defun org-tickets--parse-adf-description (adf &optional id-map)
   "Parse Jira ADF description ADF into Org text.
 Returns nil when ADF is nil or has no content.  Accepts both a full
-doc node and a bare content wrapper."
+doc node and a bare content wrapper.  ID-MAP is an alist of attachment
+id or media UUID to filename, used to resolve media nodes."
   (when adf
-    (let* ((content (seq-remove #'org-tickets--adf-empty-heading-p
+    (let* ((org-tickets--adf-attachment-id-map id-map)
+           (content (seq-remove #'org-tickets--adf-empty-heading-p
                                 (org-tickets--adf-node-content adf)))
            (text (mapconcat #'org-tickets--adf-top-block-to-org content "\n\n")))
       (and (> (length text) 0) text))))

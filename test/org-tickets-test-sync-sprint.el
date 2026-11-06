@@ -166,7 +166,7 @@ Sprint names resolve to 3453 and the Story issue type is known."
                                  (lambda (method endpoint &rest args)
                                    mock-response))
                                 (org-tickets--resolve-config #'ignore))
-      (let ((sprints (org-tickets--get-sprints-for-project "210" t)))
+      (let ((sprints (org-tickets--fetch-board-sprints "210")))
         (should (= (length sprints) 2))
         (should (stringp (caar sprints)))  ; first element key is name (string)
         ;; cdr is the ID — in real data it's a string, here the mock uses numbers
@@ -213,7 +213,7 @@ Sprint names resolve to 3453 and the Story issue type is known."
 ;; keys, not string keys.  These tests verify sprint functions handle both.
 
 (ert-deftest org-tickets-test--get-sprints-with-symbol-keys ()
-  "Test that get-sprints-for-project works when JSON has symbol keys.
+  "Test that fetch-board-sprints works when JSON has symbol keys.
 Regression test: json-read-from-string produces symbol keys, but the
 sprint functions previously used string keys with assoc, silently failing."
   (org-tickets-test--with-stubs ((org-tickets--api-request
@@ -228,11 +228,9 @@ sprint functions previously used string keys with assoc, silently failing."
                                                          (cons 'state "future"))))
                                        (cons 'isLast t))))
                               (org-tickets--resolve-config #'ignore))
-    (let ((sprints (org-tickets--get-sprints-for-project "210")))
-      (should (= (length sprints) 2))
-      (should (string= (car sprints) "Sprint 1"))
-      (should (string= (cadr sprints) "Sprint 2")))
-    (let ((sprints (org-tickets--get-sprints-for-project "210" t)))
+    (let ((names (mapcar #'car (org-tickets--fetch-board-sprints "210"))))
+      (should (equal names '("Sprint 1" "Sprint 2"))))
+    (let ((sprints (org-tickets--fetch-board-sprints "210")))
       (should (= (length sprints) 2))
       (should (string= (caar sprints) "Sprint 1"))
       (should (= (cdar sprints) 3453)))))
@@ -251,7 +249,7 @@ symbol-keyed alists from json-read-from-string."
       (should (= (org-tickets--get-board-id-for-project) 210)))))
 
 (ert-deftest org-tickets-test--get-sprints-paginates ()
-  "Test that get-sprints-for-project fetches all pages."
+  "Test that fetch-board-sprints fetches all pages."
   (let ((call-count 0))
     (org-tickets-test--with-stubs ((org-tickets--api-request
                                  (lambda (_method _endpoint &rest _args)
@@ -268,7 +266,7 @@ symbol-keyed alists from json-read-from-string."
                                                              (cons 'name "Sprint 2"))))
                                            (cons 'isLast t)))))
                                 (org-tickets--resolve-config #'ignore))
-      (let ((sprints (org-tickets--get-sprints-for-project "210" t)))
+      (let ((sprints (org-tickets--fetch-board-sprints "210")))
         (should (= call-count 2))
         (should (= (length sprints) 2))
         (should (string= (caar sprints) "Sprint 1"))

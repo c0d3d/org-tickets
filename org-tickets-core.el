@@ -318,9 +318,19 @@ they would with a `cl-defstruct'."
 
 (org-tickets--define-record org-tickets--doc
     "Represents the entire org document with parsed tickets."
-  tickets                           ; List of org-tickets--ticket structs
-  features                          ; Tickets of an `org-tickets--parent-type-p'
-  children)                         ; Tickets of an `org-tickets--child-type-p'
+  tickets)                          ; List of org-tickets--ticket structs
+
+(defun org-tickets--doc-features (doc)
+  "Return DOC's tickets whose type satisfies `org-tickets--parent-type-p'."
+  (seq-filter (lambda (ticket)
+                (org-tickets--parent-type-p (org-tickets--ticket-type ticket)))
+              (org-tickets--doc-tickets doc)))
+
+(defun org-tickets--doc-children (doc)
+  "Return DOC's tickets whose type satisfies `org-tickets--child-type-p'."
+  (seq-filter (lambda (ticket)
+                (org-tickets--child-type-p (org-tickets--ticket-type ticket)))
+              (org-tickets--doc-tickets doc)))
 
 (provide 'org-tickets-core)
 

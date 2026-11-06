@@ -74,13 +74,13 @@ resolve to a filename either way."
         (when (and media-id filename)
           (push (cons media-id filename) map))))))
 
-(defun org-tickets--parse-description-adf (description-adf key)
+(defun org-tickets--parse-description-adf (description-adf key id-map)
   "Parse DESCRIPTION-ADF into org text, or nil when absent or unparsable.
-On a parse error a warning naming ticket KEY is emitted and nil returned.
-Relies on `org-tickets--adf-attachment-id-map' being dynamically bound."
+ID-MAP resolves media nodes to attachment filenames.
+On a parse error a warning naming ticket KEY is emitted and nil returned."
   (when description-adf
     (condition-case err
-        (org-tickets--parse-adf-description description-adf)
+        (org-tickets--parse-adf-description description-adf id-map)
       (error
        (display-warning
         'org-tickets
@@ -97,16 +97,13 @@ JIRA-RESPONSE is the parsed JSON response from the Jira REST API."
          (issuelinks (append (org-tickets--alist-get "issuelinks" fields) nil))
          (links (org-tickets--parse-issuelinks issuelinks))
          (attachments (org-tickets--issue-attachments jira-response))
-         ;; Bound dynamically so the description ADF parse below can resolve
-         ;; media nodes by attachment id/UUID.
-         (org-tickets--adf-attachment-id-map
-          (org-tickets--build-attachment-id-map attachments)))
+         (id-map (org-tickets--build-attachment-id-map attachments)))
     (org-tickets--ticket-create
      :key key
      :type (org-tickets--alist-get "name" issuetype)
      :summary (org-tickets--alist-get "summary" fields)
      :description (org-tickets--parse-description-adf
-                   (org-tickets--alist-get "description" fields) key)
+                   (org-tickets--alist-get "description" fields) key id-map)
      :fix-version (org-tickets--issue-fix-version jira-response)
      :labels (append (org-tickets--alist-get "labels" fields) nil)
      :story-points (org-tickets--alist-get org-tickets-story-points-field fields)

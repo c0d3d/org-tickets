@@ -184,11 +184,9 @@ Returns an alist of (NAME . ID) strings."
                     (substring-no-properties (org-tickets--alist-get "id" it))))
             issue-types)))
 
-(defun org-tickets--get-sprints-for-project (board-id &optional include-ids)
-  "Fetch available sprints for BOARD-ID.
+(defun org-tickets--fetch-board-sprints (board-id)
+  "Fetch available sprints for BOARD-ID as a list of (NAME . ID) pairs.
 BOARD-ID is the Jira Software board ID.
-If INCLUDE-IDS is non-nil, returns list of (\"name\" . ID) pairs.
-Otherwise returns list of just sprint names.
 Fetches only active and future sprints, handling pagination."
   (org-tickets--resolve-config)
   (let ((all-values nil)
@@ -205,14 +203,10 @@ Fetches only active and future sprints, handling pagination."
         (if (or last-page-p (null values))
             (setq done t)
           (setq start-at (+ start-at (length values))))))
-    (if include-ids
-        (mapcar (lambda (sprint)
-                  (cons (org-tickets--alist-get "name" sprint)
-                        (org-tickets--alist-get "id" sprint)))
-                all-values)
-      (mapcar (lambda (sprint)
-                (org-tickets--alist-get "name" sprint))
-              all-values))))
+    (mapcar (lambda (sprint)
+              (cons (org-tickets--alist-get "name" sprint)
+                    (org-tickets--alist-get "id" sprint)))
+            all-values)))
 
 (defun org-tickets--get-board-id-for-project ()
   "Get the default board ID for the configured project.
@@ -294,7 +288,7 @@ Uses cached sprints if available, otherwise fetches from Jira."
   (unless org-tickets--sprint-cache
     (let ((board-id (org-tickets--get-board-id-for-project)))
       (when board-id
-        (setq org-tickets--sprint-cache (org-tickets--get-sprints-for-project board-id t)))))
+        (setq org-tickets--sprint-cache (org-tickets--fetch-board-sprints board-id)))))
   (assoc-default sprint-name org-tickets--sprint-cache #'string=))
 
 (provide 'org-tickets-api)

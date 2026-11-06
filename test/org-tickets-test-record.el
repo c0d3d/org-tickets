@@ -315,11 +315,12 @@ so the message alone is enough to find the typo."
 
 (ert-deftest org-tickets-test--doc-record-behaves ()
   "`org-tickets--doc' constructs, reads and type-tests correctly."
-  (let* ((tk (org-tickets--ticket-create :key "PROJ-1"))
-         (doc (org-tickets--doc-create :tickets (list tk) :features (list tk))))
+  (let* ((tk (org-tickets--ticket-create :key "PROJ-1" :type "Feature"))
+         (blank (org-tickets--ticket-create :key "PROJ-2"))
+         (doc (org-tickets--doc-create :tickets (list tk blank))))
     (should (org-tickets--doc-p doc))
     (should-not (org-tickets--ticket-p doc))
-    (should (equal (list tk) (org-tickets--doc-tickets doc)))
+    (should (equal (list tk blank) (org-tickets--doc-tickets doc)))
     (should (equal (list tk) (org-tickets--doc-features doc)))
     (should-not (org-tickets--doc-children doc))))
 

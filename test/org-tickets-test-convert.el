@@ -500,10 +500,8 @@ import side resolves that same UUID back to the filename."
          (org-content "Check [[attachment:notes.pdf][notes]] please")
          (adf (org-tickets--build-adf-description org-content attachments))
          ;; Build ID→filename map for import side
-         (org-tickets--adf-attachment-id-map
-          (list (cons "rt-uuid-1" "notes.pdf")))
-         ;; Parse ADF back to org
-         (result (org-tickets--parse-adf-description adf)))
+         (result (org-tickets--parse-adf-description
+                  adf (list (cons "rt-uuid-1" "notes.pdf")))))
     (should (string-match-p "\\[\\[attachment:notes\\.pdf\\]\\]" result))))
 
 (ert-deftest org-tickets-test--standalone-attachment-round-trip ()
@@ -513,9 +511,8 @@ import side resolves that same UUID back to the filename."
                                   (cons "mediaApiFileId" "rt-uuid-2"))))
          (org-content "[[attachment:diagram.png]]")
          (adf (org-tickets--build-adf-description org-content attachments))
-         (org-tickets--adf-attachment-id-map
-          (list (cons "rt-uuid-2" "diagram.png")))
-         (result (org-tickets--parse-adf-description adf)))
+         (result (org-tickets--parse-adf-description
+                  adf (list (cons "rt-uuid-2" "diagram.png")))))
     (should (string-match-p "\\[\\[attachment:diagram\\.png\\]\\]" result))))
 
 (ert-deftest org-tickets-test--adf-inline-markup-preserves-trailing-space ()

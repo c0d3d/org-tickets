@@ -50,7 +50,7 @@
                                 (org-tickets--api-request
                                  (lambda (method endpoint &rest args)
                                    api-response)))
-      (let ((sprints (org-tickets--get-sprints-for-project "210")))
+      (let ((sprints (mapcar #'car (org-tickets--fetch-board-sprints "210"))))
         (should (equal (length sprints) 2))
         (should (equal (car sprints) "Sprint 1"))))))
 
@@ -66,7 +66,7 @@
                                  (lambda (_method _endpoint &rest _)
                                    (setq calls (1+ calls))
                                    (pop pages))))
-      (let ((sprints (org-tickets--get-sprints-for-project "210")))
+      (let ((sprints (mapcar #'car (org-tickets--fetch-board-sprints "210"))))
         (should (= calls 2))
         (should (equal sprints '("S1" "S2")))))))
 
