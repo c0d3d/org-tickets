@@ -229,11 +229,11 @@ For each ticket with a BLOCKED-BY property, ensure the referenced ticket's
 BLOCKS property includes the current ticket's key."
   (dolist (ticket (org-tickets--doc-tickets doc))
     (let ((key (org-tickets--ticket-key ticket)))
-      (when (and key (> (length key) 0))
-        (dolist (blocker-key (org-tickets--ticket-blocked-by ticket))
-          (when (and blocker-key (> (length blocker-key) 0)
-                     (not (string= blocker-key key)))
-            (org-tickets--ensure-blocks-entry blocker-key key)))))))
+      (unless (or (null key) (string-empty-p key))
+        (dolist (blocker-key (seq-remove
+                              (lambda (b) (or (string-empty-p b) (string= b key)))
+                              (org-tickets--ticket-blocked-by ticket)))
+          (org-tickets--ensure-blocks-entry blocker-key key))))))
 
 (defun org-tickets--find-parent-ticket-key ()
   "Return the JIRA_KEY of the nearest ancestor Feature/Improvement.

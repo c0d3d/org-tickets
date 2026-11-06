@@ -612,14 +612,27 @@ Description.
     (org-entry-get (point) "BLOCKS")))
 
 (ert-deftest org-tickets-test--blocked-by-adds-key-that-is-a-prefix-of-existing ()
+  "A blocker already listing PROJ-12 still gains PROJ-1."
   (should (equal (org-tickets-test--blocks-of-5-after-resolving 1)
                  "PROJ-12,PROJ-1")))
 
 (ert-deftest org-tickets-test--blocked-by-is-idempotent ()
+  "Resolving twice does not duplicate the key in BLOCKS."
   (should (equal (org-tickets-test--blocks-of-5-after-resolving 2)
                  "PROJ-12,PROJ-1")))
 
+(ert-deftest org-tickets-test--blocked-by-ignores-whitespace-padding ()
+  "A BLOCKS value like \"PROJ-12, PROJ-1\" already contains PROJ-1."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* A\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-1\n:BLOCKED-BY: PROJ-5\n:END:\n"
+            "* B\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-5\n:BLOCKS: PROJ-12, PROJ-1\n:END:\n")
+    (org-tickets--resolve-blocked-by-in-org (org-tickets--parse-document))
+    (goto-char (org-tickets--find-ticket-by-key "PROJ-5"))
+    (should (equal (org-entry-get (point) "BLOCKS") "PROJ-12, PROJ-1"))))
+
 (ert-deftest org-tickets-test--valid-ticket-key-forms ()
+  "Project keys may contain digits and underscores but must start with a capital."
   (dolist (key '("PROJ-1" "AB2-12" "A_B-7"))
     (should (org-tickets--valid-ticket-key-p key)))
   (dolist (key '("2AB-1" "ab-1" "PROJ-" "PROJ-1x" "-1" nil))
