@@ -43,7 +43,6 @@ Large documents fire one GET+PUT per ticket concurrently; a cap
 (org-tickets--define-record org-tickets--rate-limit-state
     "Tracks adaptive rate limiting state."
   (throttled-p nil)      ; Non-nil when rate-limited
-  (retry-after-time nil)   ; Time when retry is allowed
   (max-concurrent nil)     ; nil = uncapped, number = max simultaneous
   (pending-queue nil)      ; List of deferred thunks
   (in-flight 0))           ; Number of requests currently outstanding
@@ -120,8 +119,6 @@ arbitrary buffer current."
   (let ((state (org-tickets--rate-state))
         (buf (current-buffer)))
     (setf (org-tickets--rate-limit-state-throttled-p state) t)
-    (setf (org-tickets--rate-limit-state-retry-after-time state)
-          (time-add (current-time) (seconds-to-time retry-after)))
     (setf (org-tickets--rate-limit-state-max-concurrent state) 1)
     (run-at-time retry-after nil
                  (lambda ()
@@ -142,7 +139,6 @@ Doubles CURRENT-MAX from 1 up to 8, then returns nil (uncapped)."
 Clears throttle flag, doubles max-concurrent, drains pending queue."
   (let ((state (org-tickets--rate-state)))
     (setf (org-tickets--rate-limit-state-throttled-p state) nil)
-    (setf (org-tickets--rate-limit-state-retry-after-time state) nil)
     (setf (org-tickets--rate-limit-state-max-concurrent state)
           (org-tickets--rate-limit-next-max-concurrent
            (org-tickets--rate-limit-state-max-concurrent state))))

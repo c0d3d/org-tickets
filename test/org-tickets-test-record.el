@@ -351,9 +351,9 @@ so the message alone is enough to find the typo."
 (ert-deftest org-tickets-test--ticket-record-covers-every-declared-slot ()
   "Every `org-tickets--ticket' slot accepts a value and reads it back.
 Guards against a slot being dropped or its accessor index drifting."
-  (let* ((slots '(id key type summary description fix-version labels
+  (let* ((slots '(key type summary description fix-version labels
                      story-points blocks blocked-by parent attachments
-                     sprint due-date org-node marker clear-labels
+                     sprint due-date marker clear-labels
                      clear-story-points))
          (args (apply #'append
                       (mapcar (lambda (slot)

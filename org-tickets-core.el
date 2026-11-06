@@ -254,7 +254,6 @@ they would with a `cl-defstruct'."
 
 (org-tickets--define-record org-tickets--ticket
     "Represents a Jira ticket parsed from org document."
-  id                                ; Numeric ID
   key                               ; Ticket key (e.g., "PROJ-123")
   type                              ; Jira issue type name, e.g. "Feature",
                                         ; "Improvement", "Story", "Task"
@@ -269,7 +268,6 @@ they would with a `cl-defstruct'."
   attachments                      ; List of attachment metadata (from Jira)
   sprint                           ; Sprint name from Jira
   due-date                         ; Due date string "YYYY-MM-DD"
-  org-node                         ; Org headline element (parse-time snapshot)
   marker                           ; Marker at the heading start; survives
                                         ; buffer edits during async sync
   clear-labels                     ; t when LABELS property exists but is empty

@@ -62,11 +62,9 @@
                  :blocks nil
                  :blocked-by nil
                  :parent nil
-                 :id "12345"
                  :attachments nil
                  :sprint nil
-                 :due-date "2026-06-15"
-                 :org-node nil)))
+                 :due-date "2026-06-15")))
     (with-temp-buffer
       (org-mode)
       (org-tickets--issue-to-org ticket)

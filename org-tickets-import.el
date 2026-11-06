@@ -42,13 +42,9 @@ headline shows only the summary text."
 
 (defun org-tickets--first-fix-version-name (fields)
   "Return the name of the first fixVersion in Jira FIELDS, or nil."
-  (let ((fix-versions (org-tickets--alist-get "fixVersions" fields)))
-    (when fix-versions
-      (let ((fv-list (if (listp fix-versions)
-                         fix-versions
-                       (append fix-versions nil))))
-        (when fv-list
-          (org-tickets--alist-get "name" (car fv-list)))))))
+  (let ((first (car (org-tickets--ensure-list
+                     (org-tickets--alist-get "fixVersions" fields)))))
+    (org-tickets--alist-get "name" first)))
 
 (defun org-tickets--parse-issuelinks (issuelinks)
   "Parse ISSUELINKS into a cons (BLOCKS-KEYS . BLOCKED-BY-KEYS).
@@ -74,9 +70,7 @@ order, matching the historical parse."
 Each element has keys id, filename, url, size, and media-api-file-id."
   (let ((attachments-data (org-tickets--alist-get "attachment" fields))
         (result nil))
-    (dolist (att (if (listp attachments-data)
-                     attachments-data
-                   (append attachments-data nil)))
+    (dolist (att (org-tickets--ensure-list attachments-data))
       (push (list (cons 'id (org-tickets--alist-get "id" att))
                   (cons 'filename (org-tickets--alist-get "filename" att))
                   (cons 'url (org-tickets--alist-get "content" att))
@@ -129,7 +123,6 @@ JIRA-RESPONSE is the parsed JSON response from the Jira REST API."
          (org-tickets--adf-attachment-id-map
           (org-tickets--build-attachment-id-map attachments)))
     (org-tickets--ticket-create
-     :id (org-tickets--alist-get "id" jira-response)
      :key key
      :type (org-tickets--alist-get "name" issuetype)
      :summary (org-tickets--alist-get "summary" fields)
@@ -144,67 +137,61 @@ JIRA-RESPONSE is the parsed JSON response from the Jira REST API."
      :attachments attachments
      :sprint (org-tickets--parse-sprint-from-jira-response
               (org-tickets--alist-get org-tickets-sprint-field fields))
-     :due-date (org-tickets--alist-get "duedate" fields)
-     :org-node nil)))
+     :due-date (org-tickets--alist-get "duedate" fields))))
+
+(defun org-tickets--put-property-unless-nil (name value)
+  "Set property NAME at point to VALUE, skipping it when VALUE is nil."
+  (when value
+    (org-entry-put (point) name value)))
+
+(defun org-tickets--write-ticket-properties (ticket &optional clear-missing)
+  "Write TICKET's Jira properties to the heading at point.
+Absent values are skipped, except LABELS which is always written.  When
+CLEAR-MISSING is non-nil, absent values instead overwrite the property
+with an empty string, and an absent STORY_POINTS is deleted."
+  (let* ((story-points (org-tickets--ticket-story-points ticket))
+         (empty (and clear-missing "")))
+    (org-entry-put (point) "JIRA_KEY" (org-tickets--ticket-key ticket))
+    (org-entry-put (point) "JIRA_TYPE" (org-tickets--ticket-type ticket))
+    (org-tickets--put-property-unless-nil
+     "FIX_VERSION" (or (org-tickets--ticket-fix-version ticket) empty))
+    (org-entry-put (point) "LABELS"
+                   (mapconcat #'identity (org-tickets--ticket-labels ticket) ","))
+    (dolist (spec `(("BLOCKS" . ,(org-tickets--ticket-blocks ticket))
+                    ("BLOCKED-BY" . ,(org-tickets--ticket-blocked-by ticket))))
+      (org-tickets--put-property-unless-nil
+       (car spec)
+       (if (cdr spec) (mapconcat #'identity (cdr spec) ",") empty)))
+    (org-tickets--put-property-unless-nil
+     "PARENT" (or (org-tickets--ticket-parent ticket) empty))
+    (if story-points
+        (org-entry-put (point) "STORY_POINTS" (number-to-string story-points))
+      (when clear-missing
+        (org-entry-delete (point) "STORY_POINTS")))
+    (org-tickets--put-property-unless-nil
+     "SPRINT" (or (org-tickets--ticket-sprint ticket) empty))
+    (org-tickets--put-property-unless-nil
+     "DUE_DATE" (or (org-tickets--ticket-due-date ticket) empty))))
 
 (defun org-tickets--issue-to-org (ticket)
   "Insert TICKET as an org heading with Jira properties."
-  (let* ((type (org-tickets--ticket-type ticket))
-         (summary (org-tickets--ticket-summary ticket))
-         (key (org-tickets--ticket-key ticket))
-         (description (org-tickets--ticket-description ticket))
-         (fix-version (org-tickets--ticket-fix-version ticket))
-         (labels (org-tickets--ticket-labels ticket))
-         (story-points (org-tickets--ticket-story-points ticket))
-         (blocks (org-tickets--ticket-blocks ticket))
-         (blocked-by (org-tickets--ticket-blocked-by ticket))
-         (parent (org-tickets--ticket-parent ticket))
-         (attachments (org-tickets--ticket-attachments ticket))
-         (sprint (org-tickets--ticket-sprint ticket))
-         (due-date (org-tickets--ticket-due-date ticket)))
-
-    ;; Strip type prefix from summary if present (Jira includes it in the summary)
-    (let ((clean-summary (org-tickets--strip-type-prefix type summary)))
-      ;; Determine heading level and prefix based on type
-      (pcase type
-        ((or "New Feature" "Feature" "Improvement")
-         (insert "* " clean-summary "\n"))
-        ("Story"
-         (insert "** " clean-summary "\n"))
-        (_
-         (insert "* " clean-summary "\n"))))
-
-    ;; Set properties - org-entry-put works on current heading in org-mode
-    (org-entry-put (point) "JIRA_KEY" key)
-    (org-entry-put (point) "JIRA_TYPE" type)
-    (when fix-version
-      (org-entry-put (point) "FIX_VERSION" fix-version))
-    (org-entry-put (point) "LABELS" (if labels (mapconcat 'identity labels ",") ""))
-    (when blocks
-      (org-entry-put (point) "BLOCKS" (mapconcat 'identity blocks ",")))
-    (when blocked-by
-      (org-entry-put (point) "BLOCKED-BY" (mapconcat 'identity blocked-by ",")))
-    (when parent
-      (org-entry-put (point) "PARENT" parent))
-    (when story-points
-      (org-entry-put (point) "STORY_POINTS" (number-to-string story-points)))
-    (when sprint
-      (org-entry-put (point) "SPRINT" sprint))
-    (when due-date
-      (org-entry-put (point) "DUE_DATE" due-date))
-
-    ;; Insert description if present
+  (let ((type (org-tickets--ticket-type ticket))
+        (description (org-tickets--ticket-description ticket))
+        (attachments (org-tickets--ticket-attachments ticket)))
+    ;; Jira includes the type in the summary; strip it from the headline.
+    (insert (if (equal type "Story") "** " "* ")
+            (org-tickets--strip-type-prefix
+             type (org-tickets--ticket-summary ticket))
+            "\n")
+    (org-tickets--write-ticket-properties ticket)
     (when description
       (insert "\n" description "\n"))
-
-    ;; Insert attachments if present
-    (when attachments
-      (dolist (att attachments)
-        (let ((filename (cdr (assoc 'filename att)))
-              (url (cdr (assoc 'url att))))
-          (when filename
-            (insert "\n- " filename " ")
-            (org-insert-link nil url filename)))))))
+    (dolist (att attachments)
+      (let ((filename (cdr (assoc 'filename att)))
+            (url (cdr (assoc 'url att))))
+        (when filename
+          (insert "\n- " filename " ")
+          (org-insert-link nil url filename))))))
 
 ;;;###autoload
 (defun org-tickets-import-feature (ticket-key)
@@ -223,37 +210,13 @@ and inserts as an org heading with all properties."
 TICKET is an org-tickets--ticket struct parsed from a Jira API response.
 Updates: headline title (from summary), JIRA_TYPE, FIX_VERSION, LABELS,
 STORY_POINTS, BLOCKS, BLOCKED-BY, PARENT, SPRINT, and description body."
-  (let* ((type (org-tickets--ticket-type ticket))
-         (summary (org-tickets--ticket-summary ticket))
-         (key (org-tickets--ticket-key ticket))
-         (description (org-tickets--ticket-description ticket))
-         (fix-version (org-tickets--ticket-fix-version ticket))
-         (labels (org-tickets--ticket-labels ticket))
-         (story-points (org-tickets--ticket-story-points ticket))
-         (blocks (org-tickets--ticket-blocks ticket))
-         (blocked-by (org-tickets--ticket-blocked-by ticket))
-         (parent (org-tickets--ticket-parent ticket))
-         (sprint (org-tickets--ticket-sprint ticket))
-         (due-date (org-tickets--ticket-due-date ticket)))
-
+  (let ((type (org-tickets--ticket-type ticket))
+        (summary (org-tickets--ticket-summary ticket))
+        (description (org-tickets--ticket-description ticket)))
     (org-tickets--check-ticket-level type summary (org-current-level))
-    ;; 1. Update the headline title to reflect the Jira summary (strip type prefix if present)
+    ;; Update the headline to the Jira summary (type prefix stripped).
     (org-edit-headline (org-tickets--strip-type-prefix type summary))
-
-    ;; 2. Update properties
-    (org-entry-put (point) "JIRA_KEY" key)
-    (org-entry-put (point) "JIRA_TYPE" type)
-    (org-entry-put (point) "FIX_VERSION" (or fix-version ""))
-    (org-entry-put (point) "LABELS" (if labels (mapconcat 'identity labels ",") ""))
-    (org-entry-put (point) "BLOCKS" (if blocks (mapconcat 'identity blocks ",") ""))
-    (org-entry-put (point) "BLOCKED-BY" (if blocked-by (mapconcat 'identity blocked-by ",") ""))
-    (org-entry-put (point) "PARENT" (or parent ""))
-    (if story-points
-        (org-entry-put (point) "STORY_POINTS" (number-to-string story-points))
-      (when (fboundp 'org-entry-delete)
-        (org-entry-delete (point) "STORY_POINTS")))
-    (org-entry-put (point) "SPRINT" (or sprint ""))
-    (org-entry-put (point) "DUE_DATE" (or due-date ""))
+    (org-tickets--write-ticket-properties ticket t)
 
     ;; 3. Update description body.
     ;; IMPORTANT: compute the region only now — org-edit-headline and the

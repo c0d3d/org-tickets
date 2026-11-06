@@ -260,14 +260,13 @@ Uses deferred callbacks to simulate out-of-order completion."
 ;;;; Tests: Rate Limit Helpers
 
 (ert-deftest org-tickets-test--rate-limit-on-429-sets-state ()
-  "Verify org-tickets--rate-limit-on-429 sets throttled-p, retry-after-time, max-concurrent."
+  "Verify org-tickets--rate-limit-on-429 sets throttled-p and max-concurrent."
   (org-tickets-test--with-stubs ((run-at-time #'ignore))
     (with-temp-buffer
       (org-tickets--rate-limit-reset)
       (org-tickets--rate-limit-on-429 5)
       (let ((state (org-tickets--rate-state)))
         (should (org-tickets--rate-limit-state-throttled-p state))
-        (should (org-tickets--rate-limit-state-retry-after-time state))
         (should (= 1 (org-tickets--rate-limit-state-max-concurrent state)))))))
 
 (ert-deftest org-tickets-test--rate-limit-resume-clears-throttle ()
@@ -281,8 +280,7 @@ Uses deferred callbacks to simulate out-of-order completion."
       ;; Now resume
       (org-tickets--rate-limit-resume)
       (let ((state (org-tickets--rate-state)))
-        (should (null (org-tickets--rate-limit-state-throttled-p state)))
-        (should (null (org-tickets--rate-limit-state-retry-after-time state)))))))
+        (should (null (org-tickets--rate-limit-state-throttled-p state)))))))
 
 (ert-deftest org-tickets-test--rate-limit-resume-doubles-max-concurrent ()
   "Verify org-tickets--rate-limit-resume doubles max-concurrent: 1->2->4->8->nil."
@@ -373,7 +371,6 @@ production thunk does."
       (org-tickets--rate-limit-reset)
       (let ((state (org-tickets--rate-state)))
         (should (null (org-tickets--rate-limit-state-throttled-p state)))
-        (should (null (org-tickets--rate-limit-state-retry-after-time state)))
         (should (null (org-tickets--rate-limit-state-max-concurrent state)))
         (should (null (org-tickets--rate-limit-state-pending-queue state)))))))
 

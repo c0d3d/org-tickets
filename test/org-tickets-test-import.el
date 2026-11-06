@@ -70,7 +70,6 @@
 (ert-deftest org-tickets-test--update-org-heading-from-ticket-updates-properties ()
   "Test that org-tickets--update-org-heading-from-ticket updates org properties and headline."
   (let* ((ticket (org-tickets--ticket-create
-                  :id "123"
                   :key "PROJ-42"
                   :type "New Feature"
                   :summary "Updated Feature Title"
@@ -82,8 +81,7 @@
                   :blocked-by '("PROJ-20")
                   :parent nil
                   :attachments nil
-                  :sprint "Sprint 5"
-                  :org-node nil)))
+                  :sprint "Sprint 5")))
     (with-temp-buffer
       (insert "* Old Title\n")
       (org-mode)
@@ -104,7 +102,6 @@
 (ert-deftest org-tickets-test--update-org-heading-from-ticket-story ()
   "Test that org-tickets--update-org-heading-from-ticket handles Story tickets."
   (let* ((ticket (org-tickets--ticket-create
-                  :id "456"
                   :key "PROJ-99"
                   :type "Story"
                   :summary "Implement login"
@@ -116,8 +113,7 @@
                   :blocked-by nil
                   :parent "PROJ-42"
                   :attachments nil
-                  :sprint "Sprint 3"
-                  :org-node nil)))
+                  :sprint "Sprint 3")))
     (with-temp-buffer
       (insert "* Old Story Title\n")
       (org-mode)
@@ -353,7 +349,6 @@ but the converter was using string keys with assoc, silently failing."
 (ert-deftest org-tickets-test--update-org-heading-sets-due-date ()
   "Test that org-tickets--update-org-heading-from-ticket sets DUE_DATE property."
   (let* ((ticket (org-tickets--ticket-create
-                  :id "123"
                   :key "PROJ-42"
                   :type "New Feature"
                   :summary "Feature Title"
@@ -366,8 +361,7 @@ but the converter was using string keys with assoc, silently failing."
                   :parent nil
                   :attachments nil
                   :sprint nil
-                  :due-date "2026-08-01"
-                  :org-node nil)))
+                  :due-date "2026-08-01")))
     (with-temp-buffer
       (insert "* Old Title\n")
       (org-mode)
@@ -379,7 +373,6 @@ but the converter was using string keys with assoc, silently failing."
 (ert-deftest org-tickets-test--update-org-heading-clears-due-date ()
   "Test that update-org-heading-from-ticket clears DUE_DATE when nil."
   (let* ((ticket (org-tickets--ticket-create
-                  :id "123"
                   :key "PROJ-42"
                   :type "New Feature"
                   :summary "Feature Title"
@@ -392,8 +385,7 @@ but the converter was using string keys with assoc, silently failing."
                   :parent nil
                   :attachments nil
                   :sprint nil
-                  :due-date nil
-                  :org-node nil)))
+                  :due-date nil)))
     (with-temp-buffer
       (insert "* Old Title
 :PROPERTIES:

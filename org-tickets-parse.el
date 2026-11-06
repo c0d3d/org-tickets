@@ -175,7 +175,6 @@ Returns an org-tickets--ticket struct or nil if not a valid ticket."
        :sprint (and (> (length sprint-str) 0) sprint-str)
        :due-date (and (> (length due-date-str) 0) due-date-str)
        :attachments nil  ; Populated from Jira during sync
-       :org-node node
        :marker (copy-marker (org-element-property :begin element))
        :clear-labels (and labels-str
                           (null (split-string labels-str "," t)))

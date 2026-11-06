@@ -201,9 +201,7 @@ existing JIRA_KEY (both happened with the old summary-text search)."
                  :blocks nil
                  :blocked-by nil
                  :parent nil
-                 :id "12345"
-                 :attachments nil
-                 :org-node nil)))
+                 :attachments nil)))
     (with-temp-buffer
       (org-mode)
       (org-tickets--issue-to-org ticket)
@@ -229,9 +227,7 @@ existing JIRA_KEY (both happened with the old summary-text search)."
                  :blocks '("PROJ-300")
                  :blocked-by '("PROJ-100")
                  :parent "PROJ-100"
-                 :id "12346"
-                 :attachments nil
-                 :org-node nil)))
+                 :attachments nil)))
     (with-temp-buffer
       (org-mode)
       (org-tickets--issue-to-org ticket)
@@ -490,9 +486,7 @@ With no \"attrs\"/\"language\", the src block has no language tag."
                  :blocks nil
                  :blocked-by nil
                  :parent nil
-                 :id "12345"
-                 :attachments nil
-                 :org-node nil)))
+                 :attachments nil)))
     (with-temp-buffer
       (org-mode)
       (org-tickets--issue-to-org ticket)
@@ -518,9 +512,7 @@ not 'Improvement: Change how portalAPI...' but 'Change how portalAPI...'."
                  :blocks nil
                  :blocked-by nil
                  :parent nil
-                 :id "12345"
-                 :attachments nil
-                 :org-node nil)))
+                 :attachments nil)))
     (with-temp-buffer
       (org-mode)
       (org-tickets--issue-to-org ticket)
@@ -541,9 +533,7 @@ not 'Improvement: Change how portalAPI...' but 'Change how portalAPI...'."
                  :blocks nil
                  :blocked-by nil
                  :parent nil
-                 :id "12346"
-                 :attachments nil
-                 :org-node nil)))
+                 :attachments nil)))
     (with-temp-buffer
       (org-mode)
       (org-tickets--issue-to-org ticket)
@@ -565,9 +555,7 @@ If type is nil, should not error on regexp-quote."
                  :blocks nil
                  :blocked-by nil
                  :parent nil
-                 :id "12347"
-                 :attachments nil
-                 :org-node nil)))
+                 :attachments nil)))
     (with-temp-buffer
       (org-mode)
       (org-tickets--issue-to-org ticket)

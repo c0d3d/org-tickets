@@ -39,8 +39,8 @@ Each element is (ID . FILENAME).")
   "Resolve ADF media ATTRS to an [[attachment:filename]] link.
 Looks up the media ID in `org-tickets--adf-attachment-id-map', then
 falls back to the alt attribute (which Jira sets to the filename)."
-  (let* ((id (when attrs (org-tickets--alist-get "id" attrs)))
-         (alt (when attrs (org-tickets--alist-get "alt" attrs)))
+  (let* ((id (org-tickets--alist-get "id" attrs))
+         (alt (org-tickets--alist-get "alt" attrs))
          (filename (when id (cdr (assoc id org-tickets--adf-attachment-id-map)))))
     (cond
      (filename (format "[[attachment:%s]]" filename))
@@ -122,7 +122,7 @@ Level N becomes N+2 stars (h1 is `***'), the inverse of
 `org-tickets--convert-to-adf-headline'.  Line breaks in the title become
 spaces so the rest of the title does not fall into the section."
   (let* ((attrs (org-tickets--adf-attrs node))
-         (level (or (and attrs (org-tickets--alist-get "level" attrs)) 1)))
+         (level (or (org-tickets--alist-get "level" attrs) 1)))
     (concat (make-string (+ level 2) ?*) " "
             (string-replace "\n" " " (org-tickets--adf-inlines-to-org
                                      (org-tickets--adf-node-content node))))))
@@ -151,7 +151,7 @@ description on the next parse."
 (defun org-tickets--adf-code-block-to-org (node)
   "Render an ADF codeBlock NODE as an org src block."
   (let* ((attrs (org-tickets--adf-attrs node))
-         (lang (and attrs (org-tickets--alist-get "language" attrs))))
+         (lang (org-tickets--alist-get "language" attrs)))
     (concat "#+BEGIN_SRC" (if lang (concat " " lang) "") "\n"
             (org-tickets--adf-inlines-to-org (org-tickets--adf-node-content node))
             "\n#+END_SRC")))
@@ -265,7 +265,7 @@ numbered from the node's \"order\" attribute (default 1).
 Continuation indent is INDENT plus the marker's own width, so org
 sees nested content as belonging to the item."
   (let* ((attrs (org-tickets--adf-attrs node))
-         (idx (1- (or (and ordered-p attrs (org-tickets--alist-get "order" attrs))
+         (idx (1- (or (and ordered-p (org-tickets--alist-get "order" attrs))
                       1))))
     (mapconcat
      (lambda (item)
@@ -295,11 +295,6 @@ sees nested content as belonging to the item."
 (defun org-tickets--adf-blocks-to-org (nodes)
   "Render block NODES joined by single newlines."
   (mapconcat #'org-tickets--adf-block-to-org nodes "\n"))
-
-(defun org-tickets--adf-doc-to-org (doc)
-  "Render an ADF DOC's top-level blocks joined by blank lines."
-  (mapconcat #'org-tickets--adf-block-to-org
-             (org-tickets--adf-node-content doc) "\n\n"))
 
 ;;;; Entry Point
 
