@@ -16,16 +16,14 @@ overwrites of sprint assignments made in the Jira UI.
 
 ## Key Invariants
 
-- `org-tickets--update-ticket` is never called with a `:sprint` argument from
-  `org-tickets--sync-ticket`. This is enforced by a regression test in
-  `org-tickets-test-sync-sprint.el` (`org-tickets-test--sync-ticket-update-does-not-send-sprint`).
+- The sync flow (phase 1 in `org-tickets-sync-phases.el`) builds payloads with
+  `org-tickets--ticket-fields` directly: creates carry `org-tickets-default-sprint`,
+  updates carry no sprint.
 
-- `org-tickets--create-ticket` is called with `org-tickets-default-sprint`, not the
-  org drawer value. This is enforced by a regression test in
-  `org-tickets-test-sync-sprint.el` (`org-tickets-test--sync-ticket-create-uses-default-sprint`).
-
-- `org-tickets--update-ticket` still accepts a `:sprint` keyword for programmatic
-  use (e.g., `org-tickets--create-story`). Only the sync flow omits it.
+- `org-tickets--create-ticket` and `org-tickets--update-ticket` take an
+  `org-tickets--ticket` record and send its `sprint` slot (resolved to an ID),
+  overriding the default sprint. Only interactive commands such as
+  `org-tickets-create-story` use them.
 
 ## Configuration
 

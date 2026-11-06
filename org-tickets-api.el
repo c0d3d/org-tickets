@@ -273,54 +273,37 @@ one at the top of the buffer."
                      org-tickets--issue-type-ids
                      ",")))
 
-(defun org-tickets--create-ticket (type summary description
-                                &optional fix-version labels
-                                story-points sprint
-                                attachments due-date)
-  "Create a new ticket in Jira.
-TYPE is the Jira issue type name, SUMMARY the title and DESCRIPTION
-the org-format body.  Optional FIX-VERSION is a version name, LABELS a
-list of strings, STORY-POINTS a number, SPRINT a sprint ID or name,
-ATTACHMENTS the Jira attachment metadata used to resolve attachment:
-links, and DUE-DATE a date string.
-Payload construction is delegated to `org-tickets--ticket-fields'; an
-explicit SPRINT overrides the configured default sprint.  Parent
-relationships are modeled as \"Blocks\" links, never Jira's parent
-field, so no parent argument is accepted here."
+(defun org-tickets--ticket-request-fields (ticket create-p)
+  "Return the Jira `fields' alist for TICKET, a `org-tickets--ticket' record.
+CREATE-P selects the create field set.  The record's attachments resolve
+attachment: links, and its sprint overrides any default sprint."
+  (org-tickets--with-sprint-field
+   (org-tickets--ticket-fields ticket
+                            :create-p create-p
+                            :attachments (org-tickets--ticket-attachments ticket))
+   (org-tickets--ticket-sprint ticket)))
+
+(defun org-tickets--create-ticket (ticket)
+  "Create TICKET, an `org-tickets--ticket' record, in Jira.
+Returns the Jira response, whose `key' is the new issue key.  Payload
+construction is delegated to `org-tickets--ticket-fields'; the record's
+sprint overrides the configured default sprint.  Parent relationships
+are modeled as \"Blocks\" links, never Jira's parent field."
   (org-tickets--ensure-issue-types)
-  (let* ((ticket (org-tickets--ticket-create
-                  :type type :summary summary :description description
-                  :fix-version fix-version :labels labels
-                  :story-points story-points :due-date due-date))
-         (fields (org-tickets--ticket-fields ticket
-                                          :create-p t
-                                          :attachments attachments)))
-    (org-tickets--api-request
-     "POST" "/rest/api/3/issue"
-     (list (cons 'fields (org-tickets--with-sprint-field fields sprint))))))
+  (org-tickets--api-request
+   "POST" "/rest/api/3/issue"
+   (list (cons 'fields (org-tickets--ticket-request-fields ticket t)))))
 
-(defun org-tickets--update-ticket (ticket-key &rest args)
-  "Update an existing Jira ticket TICKET-KEY.
-
-ARGS is a plist of optional updates: :summary, :description,
-:fix-version, :labels, :story-points, :sprint, :attachments and
-:due-date.  Payload construction is delegated to
-`org-tickets--ticket-fields'."
-  (let* ((sprint (plist-get args :sprint))
-         (ticket (org-tickets--ticket-create
-                  :key ticket-key
-                  :summary (plist-get args :summary)
-                  :description (plist-get args :description)
-                  :fix-version (plist-get args :fix-version)
-                  :labels (plist-get args :labels)
-                  :story-points (plist-get args :story-points)
-                  :due-date (plist-get args :due-date)))
-         (fields (org-tickets--ticket-fields
-                  ticket :attachments (plist-get args :attachments))))
-    (setq fields (org-tickets--with-sprint-field fields sprint))
+(defun org-tickets--update-ticket (ticket)
+  "PUT TICKET, an `org-tickets--ticket' record, to its Jira issue.
+Only the fields the record carries are sent; its `clear-labels' and
+`clear-story-points' slots clear those fields.  Sends nothing when the
+record carries no fields."
+  (let ((fields (org-tickets--ticket-request-fields ticket nil)))
     (when fields
-      (org-tickets--api-request "PUT" (concat "/rest/api/3/issue/" ticket-key)
-                             (list (cons 'fields fields))))))
+      (org-tickets--api-request
+       "PUT" (concat "/rest/api/3/issue/" (org-tickets--ticket-key ticket))
+       (list (cons 'fields fields))))))
 
 (defvar org-tickets--sprint-cache nil
   "Cache of sprints for the current project: ((\"name\" . ID) ...).")

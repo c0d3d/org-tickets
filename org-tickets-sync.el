@@ -55,8 +55,11 @@ SPRINT is the Sprint name (defaults to `org-tickets-default-sprint')."
          ;; property, so the Story→Feature "Blocks" link is created on the
          ;; next sync (see `org-tickets--async-sync-ticket-links').
          (result (org-tickets--create-ticket
-                  "Story" summary description (plist-get parent :fix-version)
-                  labels nil sprint nil (plist-get parent :due-date)))
+                  (org-tickets--ticket-create
+                   :type "Story" :summary summary :description description
+                   :fix-version (plist-get parent :fix-version)
+                   :labels labels :sprint sprint
+                   :due-date (plist-get parent :due-date))))
          (new-key (alist-get 'key result)))
     (org-tickets--insert-story-heading summary feature-key new-key sprint labels)
     (dolist (blocked blocks-list)
@@ -152,7 +155,8 @@ VERSION is the Fix Version string (e.g., \"Aug2026\")."
   (unless (org-tickets--validate-fix-version version)
     (error "Invalid Fix Version: %s. Valid months are: %s"
            version (mapconcat 'identity org-tickets-fix-version-months ",")))
-  (org-tickets--update-ticket ticket-key :fix-version version)
+  (org-tickets--update-ticket
+   (org-tickets--ticket-create :key ticket-key :fix-version version))
   (org-tickets--set-org-fix-version ticket-key version))
 
 (defun org-tickets--set-org-fix-version (ticket-key version)
@@ -167,13 +171,9 @@ STORY-POINTS of 0 or nil removes the estimate in Jira and org, and
 restores `org-tickets-needs-sizing-label'."
   (interactive "sStory key: \nNStory points (0 to remove): ")
   (let ((points (and (numberp story-points) (> story-points 0) story-points)))
-    (if points
-        (org-tickets--update-ticket story-key :story-points points)
-      (org-tickets--api-request
-       "PUT" (concat "/rest/api/3/issue/" story-key)
-       (list (cons 'fields
-                   (list (cons (intern org-tickets-story-points-field)
-                               :json-null))))))
+    (org-tickets--update-ticket
+     (org-tickets--ticket-create :key story-key :story-points points
+                                 :clear-story-points (not points)))
     (org-tickets--set-org-story-points story-key points)
     (org-tickets--update-sizing-label story-key points)))
 

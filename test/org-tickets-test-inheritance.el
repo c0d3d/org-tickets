@@ -461,34 +461,47 @@ parent link; a type org-tickets has never heard of must not repeat it."
 
 ;;;; org-tickets-create-story
 
-(defmacro org-tickets-test--capturing-create-story (created &rest body)
-  "Run BODY with ticket creation stubbed; push each call's args onto CREATED."
+(defmacro org-tickets-test--capturing-create-story (requests &rest body)
+  "Run BODY with Jira requests stubbed; push each (METHOD ENDPOINT DATA) onto REQUESTS.
+Every request answers with the new issue key P-9."
   (declare (indent 1))
   `(org-tickets-test--with-stubs
-       ((org-tickets--create-ticket
-         (lambda (&rest args)
-           (push args ,created)
+       ((org-tickets--ensure-issue-types #'ignore)
+        (org-tickets--api-request
+         (lambda (method endpoint &optional data)
+           (push (list method endpoint data) ,requests)
            (list (cons 'key "P-9")))))
-     (let ((org-tickets-default-sprint nil))
+     (let ((org-tickets-default-sprint nil)
+           (org-tickets--project-id "12345")
+           (org-tickets--issue-type-ids '(("Story" . "10001"))))
        ,@body)))
+
+(defun org-tickets-test--created-issue-payload (requests)
+  "Return the data of the single issue-create POST among REQUESTS."
+  (let ((posts (seq-filter (lambda (r)
+                             (and (equal (nth 0 r) "POST")
+                                  (equal (nth 1 r) "/rest/api/3/issue")))
+                           requests)))
+    (should (= 1 (length posts)))
+    (nth 2 (car posts))))
 
 (ert-deftest org-tickets-test--create-story-sends-feature-due-date ()
   "A story created under an in-buffer feature is POSTed with its due date."
-  (let ((created nil))
-    (org-tickets-test--capturing-create-story created
+  (let ((requests nil))
+    (org-tickets-test--capturing-create-story requests
       (with-temp-buffer
         (org-mode)
         (insert "* Feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
                 ":DUE_DATE: 2026-08-01\n:FIX_VERSION: 25.3\n:END:\n")
         (org-tickets-create-story "P-1" "New story")))
-    (let ((args (car created)))
-      (should (equal (nth 3 args) "25.3"))
-      (should (equal (nth 8 args) "2026-08-01")))))
+    (let ((data (org-tickets-test--created-issue-payload requests)))
+      (should (equal (org-tickets-test--payload-fix-version data) "25.3"))
+      (should (equal (org-tickets-test--payload-due-date data) "2026-08-01")))))
 
 (ert-deftest org-tickets-test--create-story-under-feature-not-in-buffer ()
   "A feature absent from the buffer is read from Jira, and the story is inserted."
-  (let ((created nil))
-    (org-tickets-test--capturing-create-story created
+  (let ((requests nil))
+    (org-tickets-test--capturing-create-story requests
       (org-tickets-test--with-stubs
           ((org-tickets--get-ticket
             (lambda (_key)
@@ -503,10 +516,10 @@ parent link; a type org-tickets has never heard of must not repeat it."
           (goto-char (org-tickets--find-ticket-by-key "P-9"))
           (should (equal (org-entry-get (point) "PARENT") "P-1"))
           (should (equal (org-entry-get (point) "LABELS") "Team")))))
-    (let ((args (car created)))
-      (should (equal (nth 3 args) "25.4"))
-      (should (equal (nth 4 args) '("Team")))
-      (should (equal (nth 8 args) "2026-09-30")))))
+    (let ((data (org-tickets-test--created-issue-payload requests)))
+      (should (equal (org-tickets-test--payload-fix-version data) "25.4"))
+      (should (equal (cdr (assq 'labels (cdr (assq 'fields data)))) '("Team")))
+      (should (equal (org-tickets-test--payload-due-date data) "2026-09-30")))))
 
 (provide 'org-tickets-test-inheritance)
 

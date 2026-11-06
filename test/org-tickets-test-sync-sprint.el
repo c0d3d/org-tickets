@@ -41,48 +41,94 @@
 
 ;;;; Tests for Sprint API Format
 
+(defmacro org-tickets-test--capturing-requests (requests &rest body)
+  "Run BODY with Jira requests stubbed; push each (METHOD ENDPOINT DATA) onto REQUESTS.
+Sprint names resolve to 3453 and the Story issue type is known."
+  (declare (indent 1))
+  `(org-tickets-test--with-stubs
+       ((org-tickets--api-request
+         (lambda (method endpoint &optional data)
+           (push (list method endpoint data) ,requests)
+           (list (cons 'key "PROJ-9"))))
+        (org-tickets--resolve-sprint-id (lambda (_name) 3453))
+        (org-tickets--ensure-issue-types #'ignore))
+     (let ((org-tickets-default-sprint nil)
+           (org-tickets--project-id "12345")
+           (org-tickets--issue-type-ids '(("Story" . "10001"))))
+       ,@body)))
+
+(defun org-tickets-test--sent-field (request field)
+  "Return FIELD (a symbol) from the fields of a captured REQUEST."
+  (cdr (assq field (cdr (assq 'fields (nth 2 request))))))
+
 (ert-deftest org-tickets-test--sprint-sent-as-id-in-update ()
-  "Test that update-ticket sends sprint as a numeric ID in customfield_10020.
-Mocks resolve-sprint-id to return a known ID for the sprint name."
-  (let ((captured-fields nil))
-    (org-tickets-test--with-stubs ((org-tickets--api-request
-                                 (lambda (_method _endpoint data)
-                                   (setq captured-fields (cdr (assoc 'fields data)))))
-                                (org-tickets--resolve-sprint-id
-                                 (lambda (_name) 3453)))
-      (org-tickets--update-ticket "PROJ-100" :sprint "Sprint 1")
-      ;; Sprint should be sent as bare numeric ID, not wrapped in {"id": ...}
-      (let ((sprint-field (cdr (assoc 'customfield_10020 captured-fields))))
-        (should (numberp sprint-field))
-        (should (= sprint-field 3453))))))
+  "Updating a ticket with a sprint name PUTs the resolved numeric ID."
+  (let ((requests nil))
+    (org-tickets-test--capturing-requests requests
+      (org-tickets--update-ticket
+       (org-tickets--ticket-create :key "PROJ-100" :sprint "Sprint 1")))
+    (should (equal (butlast (car requests)) '("PUT" "/rest/api/3/issue/PROJ-100")))
+    (should (eql (org-tickets-test--sent-field (car requests) 'customfield_10020)
+                 3453))))
 
 (ert-deftest org-tickets-test--sprint-sent-as-id-numeric ()
-  "Test that a numeric sprint value is passed through as-is."
-  (let ((captured-fields nil))
-    (org-tickets-test--with-stubs ((org-tickets--api-request
-                                 (lambda (_method _endpoint data)
-                                   (setq captured-fields (cdr (assoc 'fields data))))))
-      (org-tickets--update-ticket "PROJ-100" :sprint 3453)
-      (let ((sprint-field (cdr (assoc 'customfield_10020 captured-fields))))
-        (should (numberp sprint-field))
-        (should (= sprint-field 3453))))))
+  "A numeric sprint value is passed through as-is."
+  (let ((requests nil))
+    (org-tickets-test--capturing-requests requests
+      (org-tickets--update-ticket
+       (org-tickets--ticket-create :key "PROJ-100" :sprint 3453)))
+    (should (eql (org-tickets-test--sent-field (car requests) 'customfield_10020)
+                 3453))))
 
 (ert-deftest org-tickets-test--sprint-sent-as-id-in-create ()
-  "Test that create-ticket sends sprint as a numeric ID."
-  (let ((captured-fields nil))
-    (org-tickets-test--with-stubs ((org-tickets--api-request
-                                 (lambda (_method _endpoint data)
-                                   (setq captured-fields (cdr (assoc 'fields data)))))
-                                (org-tickets--resolve-sprint-id
-                                 (lambda (_name) 3453))
-                                (org-tickets--ensure-issue-types #'ignore)
-                                (org-tickets--resolve-config #'ignore))
-      (let ((org-tickets--project-id "12345")
-            (org-tickets--issue-type-ids '(("Story" . "10001"))))
-        (org-tickets--create-ticket "Story" "Test" nil nil nil nil "Sprint 1"))
-      (let ((sprint-field (cdr (assoc 'customfield_10020 captured-fields))))
-        (should (numberp sprint-field))
-        (should (= sprint-field 3453))))))
+  "Creating a ticket with a sprint name POSTs the resolved numeric ID."
+  (let ((requests nil))
+    (org-tickets-test--capturing-requests requests
+      (should (equal (alist-get 'key (org-tickets--create-ticket
+                                      (org-tickets--ticket-create
+                                       :type "Story" :summary "Test"
+                                       :sprint "Sprint 1")))
+                     "PROJ-9")))
+    (let ((request (car requests)))
+      (should (equal (butlast request) '("POST" "/rest/api/3/issue")))
+      (should (equal (org-tickets-test--sent-field request 'summary) "Test"))
+      (should (equal (org-tickets-test--sent-field request 'issuetype)
+                     '(("id" . "10001"))))
+      (should (eql (org-tickets-test--sent-field request 'customfield_10020)
+                   3453)))))
+
+(ert-deftest org-tickets-test--update-ticket-without-changes-sends-nothing ()
+  "A ticket record with nothing to update issues no request."
+  (let ((requests nil))
+    (org-tickets-test--capturing-requests requests
+      (should-not (org-tickets--update-ticket
+                   (org-tickets--ticket-create :key "PROJ-100"))))
+    (should-not requests)))
+
+;;;; Tests for with-sprint-field
+
+(ert-deftest org-tickets-test--with-sprint-field-replaces-existing-sprint ()
+  "A resolvable sprint replaces any sprint entry already in FIELDS."
+  (should (equal (org-tickets--with-sprint-field
+                  '((summary . "S") (customfield_10020 . 1)) 3453)
+                 '((summary . "S") (customfield_10020 . 3453)))))
+
+(ert-deftest org-tickets-test--with-sprint-field-adds-resolved-name ()
+  "A sprint name is resolved to its ID and added."
+  (org-tickets-test--with-stubs ((org-tickets--resolve-sprint-id
+                               (lambda (_name) 3453)))
+    (should (equal (org-tickets--with-sprint-field '((summary . "S")) "Sprint 1")
+                   '((summary . "S") (customfield_10020 . 3453))))))
+
+(ert-deftest org-tickets-test--with-sprint-field-leaves-fields-for-no-sprint ()
+  "Nil, empty and unresolvable sprints leave FIELDS unchanged."
+  (let ((fields '((summary . "S") (customfield_10020 . 1))))
+    (org-tickets-test--with-stubs ((org-tickets--resolve-sprint-id
+                                 (lambda (_name) nil)))
+      (should (equal (org-tickets--with-sprint-field fields nil) fields))
+      (should (equal (org-tickets--with-sprint-field fields "") fields))
+      (should (equal (org-tickets--with-sprint-field fields "No Such Sprint")
+                     fields)))))
 
 ;;;; Tests for resolve-sprint-value
 
@@ -136,38 +182,23 @@ Mocks resolve-sprint-id to return a known ID for the sprint name."
                        "Sprint 42")))))
 
 (ert-deftest org-tickets-test--fix-version-sent-as-array ()
-  "Test that fixVersions is sent to Jira API as an array, not an object."
-  ;; Test the fixVersions handling logic directly (as implemented in org-tickets--create-ticket)
-  (let ((fields nil)
-        (fix-version "Aug2026"))
-    ;; This mirrors the fixed code from org-tickets--create-ticket (lines 225-226)
-    (when (and fix-version (not (string= fix-version "")))
-      (push (cons 'fixVersions (list (list (cons "name" fix-version)))) fields))
-    ;; Verify fixVersions is sent as an array of objects
-    (let ((fix-versions (cdr (assoc 'fixVersions fields))))
-      ;; Should be a list (array), not a single alist
-      (should (listp fix-versions))
-      ;; Each element should be a list (object)
-      (should (listp (car fix-versions)))
-      (should (cdr (assoc "name" (car fix-versions))))
-      (should (equal (cdr (assoc "name" (car fix-versions))) "Aug2026")))))
+  "Creating a ticket sends fixVersions as an array of name objects."
+  (let ((requests nil))
+    (org-tickets-test--capturing-requests requests
+      (org-tickets--create-ticket
+       (org-tickets--ticket-create :type "Story" :summary "S"
+                                   :fix-version "Aug2026")))
+    (should (equal (org-tickets-test--sent-field (car requests) 'fixVersions)
+                   '((("name" . "Aug2026")))))))
 
 (ert-deftest org-tickets-test--fix-version-sent-as-array-update ()
-  "Test that fixVersions is sent to Jira API as an array in update-ticket."
-  ;; Test the fixVersions handling logic directly (as implemented in org-tickets--update-ticket)
-  (let ((fields nil)
-        (fix-version "Aug2026"))
-    ;; This mirrors the fixed code from org-tickets--update-ticket (lines 251-252)
-    (when (and fix-version (not (string= fix-version "")))
-      (push (cons 'fixVersions (list (list (cons "name" fix-version)))) fields))
-    ;; Verify fixVersions is sent as an array of objects
-    (let ((fix-versions (cdr (assoc 'fixVersions fields))))
-      ;; Should be a list (array), not a single alist
-      (should (listp fix-versions))
-      ;; Each element should be a list (object)
-      (should (listp (car fix-versions)))
-      (should (cdr (assoc "name" (car fix-versions))))
-      (should (equal (cdr (assoc "name" (car fix-versions))) "Aug2026")))))
+  "Updating a ticket sends fixVersions as an array of name objects."
+  (let ((requests nil))
+    (org-tickets-test--capturing-requests requests
+      (org-tickets--update-ticket
+       (org-tickets--ticket-create :key "PROJ-100" :fix-version "Aug2026")))
+    (should (equal (org-tickets-test--sent-field (car requests) 'fixVersions)
+                   '((("name" . "Aug2026")))))))
 
 ;;;; Tests for sprint cache clearing
 

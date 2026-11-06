@@ -564,31 +564,46 @@ If type is nil, should not error on regexp-quote."
       ;; Should have the summary text
       (should (re-search-forward "Some summary without type prefix" nil t)))))
 
+(defun org-tickets-test--story-sizing-request (points)
+  "Run `org-tickets-update-story-sizing' with POINTS on story P-1.
+Return the (METHOD ENDPOINT BODY) of the single request sent, where BODY
+is the JSON text that reaches Jira."
+  (let ((sent nil))
+    (org-tickets-test--with-stubs ((org-tickets--api-request
+                                 (lambda (method endpoint &optional data)
+                                   (push (list method endpoint
+                                               (org-tickets--encode-request-data data))
+                                         sent)
+                                   nil)))
+      (org-tickets-update-story-sizing "P-1" points))
+    (should (= 1 (length sent)))
+    (car sent)))
+
 (ert-deftest org-tickets-test--update-story-sizing-zero-removes ()
   "0 story points clears the estimate instead of sending 0."
   (with-temp-buffer
     (org-mode)
     (insert "* S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-1\n"
             ":STORY_POINTS: 5\n:LABELS:\n:END:\n")
-    (let ((sent nil))
-      (org-tickets-test--with-stubs ((org-tickets--update-ticket
-                                   (lambda (&rest args) (setq sent (cons :update args)) nil))
-                                  (org-tickets--api-request
-                                   (lambda (method endpoint &optional data)
-                                     (setq sent (list :put method endpoint data)) nil)))
-        (org-tickets-update-story-sizing "P-1" 0))
-      ;; A clearing PUT was sent (null story points), not :story-points 0.
-      ;; `json-null' is bound here exactly as the real request path binds
-      ;; it at the encode site (see `org-tickets--api-request'), since this
-      ;; test mocks that function and encodes the captured payload itself.
-      (should (eq (car sent) :put))
-      (let ((json-null :json-null))
-        (should (string-match-p "\"customfield_10016\":null"
-                                (json-encode (nth 3 sent)))))
-      ;; Org property removed, NeedsSizing restored.
-      (goto-char (point-min))
-      (should (null (org-entry-get (point) "STORY_POINTS")))
-      (should (string-match-p "NeedsSizing" (org-entry-get (point) "LABELS"))))))
+    (should (equal (org-tickets-test--story-sizing-request 0)
+                   '("PUT" "/rest/api/3/issue/P-1"
+                     "{\"fields\":{\"customfield_10016\":null}}")))
+    ;; Org property removed, NeedsSizing restored.
+    (goto-char (point-min))
+    (should (null (org-entry-get (point) "STORY_POINTS")))
+    (should (string-match-p "NeedsSizing" (org-entry-get (point) "LABELS")))))
+
+(ert-deftest org-tickets-test--update-story-sizing-sets-points ()
+  "Positive story points are PUT as a number and recorded in org."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-1\n"
+            ":LABELS: NeedsSizing\n:END:\n")
+    (should (equal (org-tickets-test--story-sizing-request 5)
+                   '("PUT" "/rest/api/3/issue/P-1"
+                     "{\"fields\":{\"customfield_10016\":5}}")))
+    (goto-char (point-min))
+    (should (equal (org-entry-get (point) "STORY_POINTS") "5"))))
 
 (ert-deftest org-tickets-test--sizing-label-list-operations ()
   "Removing NeedsSizing leaves no stray comma and never touches
@@ -644,25 +659,33 @@ records exactly what create sent (not always NeedsSizing)."
                                        org-tickets-set-fix-version org-tickets-update-story-sizing))
     (should (commandp cmd))))
 
-(ert-deftest org-tickets-test--create-ticket-payload-via-unified-builder ()
-  "The interactive create path and the sync pipeline build identical
-fields for identical tickets (one builder, not four copies)."
+(ert-deftest org-tickets-test--create-ticket-payload ()
+  "Creating a ticket record POSTs every field it carries."
   (let* ((org-tickets--project-id "12345")
          (org-tickets--issue-type-ids '(("Story" . "1") ("New Feature" . "2")))
          (org-tickets-default-sprint nil)
          (sent nil))
     (org-tickets-test--with-stubs ((org-tickets--ensure-issue-types #'ignore)
                                 (org-tickets--api-request
-                                 (lambda (_m _e &optional data) (setq sent data) '((key . "P-9")))))
-      (org-tickets--create-ticket "Story" "S" "body" "Aug2026" '("l") 3 nil nil "2026-08-01"))
-    (let ((fields (cdr (assq 'fields sent)))
-          (expected (org-tickets--ticket-fields
-                     (org-tickets--ticket-create
-                      :type "Story" :summary "S" :description "body"
-                      :fix-version "Aug2026" :labels '("l")
-                      :story-points 3 :due-date "2026-08-01")
-                     :create-p t)))
-      (should (equal fields expected)))))
+                                 (lambda (m e &optional data)
+                                   (setq sent (list m e data))
+                                   '((key . "P-9")))))
+      (should (equal (org-tickets--create-ticket
+                      (org-tickets--ticket-create
+                       :type "Story" :summary "S" :description "body"
+                       :fix-version "Aug2026" :labels '("l")
+                       :story-points 3 :due-date "2026-08-01"))
+                     '((key . "P-9")))))
+    (should (equal (butlast sent) '("POST" "/rest/api/3/issue")))
+    (let ((fields (cdr (assq 'fields (nth 2 sent)))))
+      (should (equal (alist-get 'project fields) '(("id" . "12345"))))
+      (should (equal (alist-get 'issuetype fields) '(("id" . "1"))))
+      (should (equal (alist-get 'summary fields) "S"))
+      (should (alist-get 'description fields))
+      (should (equal (alist-get 'fixVersions fields) '((("name" . "Aug2026")))))
+      (should (equal (alist-get 'labels fields) '("l")))
+      (should (equal (alist-get 'customfield_10016 fields) 3))
+      (should (equal (alist-get 'duedate fields) "2026-08-01")))))
 
 (ert-deftest org-tickets-test--json-null-clearing-round-trips-at-encode-site ()
   "Clearing a field produces literal JSON `null' through the same
