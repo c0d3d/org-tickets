@@ -5,9 +5,9 @@
 ;; ADF headings import as org headlines two levels deeper (h1 is `***')
 ;; so they nest under the `*' parent and `**' Story headings the
 ;; importer writes.  Pulling replaces those headlines along with the
-;; rest of the description, never touching child tickets, and a
-;; push/pull cycle is a fixpoint.  Other blocks must still never emit
-;; a headline.
+;; rest of the description, keeping local COMMENT subtrees and never
+;; touching child tickets, and a push/pull cycle is a fixpoint.  Other
+;; blocks must still never emit a headline.
 
 ;;; Code:
 
@@ -266,6 +266,40 @@ whole and do not create extra tickets."
            (desc "Intro.\n\n*** H\n\nh\n\n**** S")
            (once (org-tickets-test--pull-into text "P-1" type desc)))
       (should (equal (org-tickets-test--pull-into once "P-1" type desc) once)))))
+
+(defconst org-tickets-test--story-with-comment
+  (concat (org-tickets-test--ticket-text "*" "Feature" "F" "" "P-1")
+          (org-tickets-test--ticket-text
+           "**" "Story" "S"
+           "Old.\n*** Old H\nold\n*** COMMENT private\nsecret\n**** note\nmine\n"
+           "P-2")
+          (org-tickets-test--ticket-text "**" "Story" "S2" "s2\n" "P-3"))
+  "A Story whose description holds a COMMENT subtree, between two tickets.")
+
+(ert-deftest org-tickets-test--headings-pull-keeps-comment-subtree ()
+  "Pulling replaces description headings but keeps COMMENT subtrees.
+The kept subtree, body and children included, follows the pulled
+description and precedes the next ticket."
+  (let ((pulled (org-tickets-test--pull-into
+                 org-tickets-test--story-with-comment "P-2" "Story" "*** New H\n\nnew")))
+    (should (equal (org-tickets-test--parse-tickets pulled)
+                   '(("F" . nil)
+                     ("S" . "*** New H\n\nnew\n*** COMMENT private\nsecret\n**** note\nmine")
+                     ("S2" . "s2"))))))
+
+(ert-deftest org-tickets-test--headings-pull-comment-subtree-with-empty-description ()
+  "An empty Jira description still keeps the local COMMENT subtree."
+  (let ((pulled (org-tickets-test--pull-into
+                 org-tickets-test--story-with-comment "P-2" "Story" nil)))
+    (should (equal (org-tickets-test--description-of pulled "S")
+                   "*** COMMENT private\nsecret\n**** note\nmine"))))
+
+(ert-deftest org-tickets-test--headings-pull-comment-subtree-is-idempotent ()
+  "Repeated pulls neither duplicate nor reorder a COMMENT subtree."
+  (let* ((desc "Intro.\n\n*** New H\n\nnew")
+         (once (org-tickets-test--pull-into
+                org-tickets-test--story-with-comment "P-2" "Story" desc)))
+    (should (equal (org-tickets-test--pull-into once "P-2" "Story" desc) once))))
 
 ;;;; Full round trips
 

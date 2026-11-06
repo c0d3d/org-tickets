@@ -179,6 +179,10 @@ Headlines under a ticket that have no `JIRA_TYPE` are part of its
 description and push as Jira headings: `***` is h1, `****` is h2, and so
 on down to h6.  The description ends at the first heading below it
 that is itself a ticket.
+`COMMENT` headlines (and their subtrees) are private notes: push skips
+them, and pulling remote changes replaces the rest of the description
+but keeps them, after the pulled text.  Plain `#` comment lines are not
+kept; pull replaces them along with the description.
 Commands such as `org-tickets-copy-link`, `org-tickets-pull-remote-changes`
 and the attachment commands act on the owning ticket when run from
 inside a description heading.

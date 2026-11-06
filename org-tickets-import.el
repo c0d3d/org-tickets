@@ -180,17 +180,44 @@ and inserts as an org heading with all properties."
     (org-tickets--issue-to-org ticket)
     (message "org-tickets: Imported %s" ticket-key)))
 
+(defun org-tickets--next-comment-subtree (end)
+  "Return the COMMENT subtree on the heading matched last, or nil.
+Point must be just after a heading match.  A commented heading's
+subtree, cut off at END, is returned and point moves past it; any
+other heading is skipped to the next line."
+  (goto-char (match-beginning 0))
+  (if (org-element-property :commentedp (org-element-at-point))
+      (let ((start (point)))
+        (goto-char (min end (save-excursion (org-end-of-subtree t t) (point))))
+        (buffer-substring-no-properties start (point)))
+    (forward-line 1)
+    nil))
+
+(defun org-tickets--comment-subtrees (beg end)
+  "Return the text of each outermost COMMENT subtree between BEG and END.
+Push never sends these, so pull keeps them.  Point is not moved."
+  (save-excursion
+    (goto-char beg)
+    (let ((subtrees nil))
+      (while (re-search-forward org-outline-regexp-bol end t)
+        (push (org-tickets--next-comment-subtree end) subtrees))
+      (nreverse (delq nil subtrees)))))
+
 (defun org-tickets--replace-description (description)
   "Replace the description of the ticket heading at point with DESCRIPTION.
+COMMENT subtrees in the old description are kept, after DESCRIPTION.
 The region starts at the end of the :END: line, so the newline the
 deletion consumes is always restored; a nil DESCRIPTION leaves an empty
 body.  Point is preserved."
-  (let ((region (org-tickets--description-region)))
+  (let* ((region (org-tickets--description-region))
+         (comments (and region (org-tickets--comment-subtrees
+                                (car region) (cdr region)))))
     (when region
       (save-excursion
         (delete-region (car region) (cdr region))
         (goto-char (car region))
-        (insert "\n" (if description (concat description "\n") ""))))))
+        (insert "\n" (if description (concat description "\n") "")
+                (apply #'concat comments))))))
 
 (defun org-tickets--update-org-heading-from-ticket (ticket)
   "Update the org heading at point with data from TICKET.
