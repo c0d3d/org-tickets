@@ -69,15 +69,12 @@ outline ancestor ticket found from its heading marker."
 
 (defun org-tickets--all-features-exist-p (doc)
   "Return non-nil if every feature in DOC has a non-empty JIRA_KEY."
-  (seq-every-p (lambda (f)
-                 (let ((key (org-tickets--ticket-key f)))
-                   (and key (> (length key) 0))))
+  (seq-every-p #'org-tickets--ticket-has-key-p
                (org-tickets--doc-features doc)))
 
 (defun org-tickets--ticket-has-key-p (ticket)
   "Return non-nil if TICKET has a non-empty JIRA_KEY."
-  (let ((key (org-tickets--ticket-key ticket)))
-    (and key (> (length key) 0))))
+  (and (org-tickets--non-empty-string (org-tickets--ticket-key ticket)) t))
 
 (defun org-tickets--safe-with-buffer (buffer body-fn)
   "Call BODY-FN in BUFFER if it is alive, otherwise log a debug message.
@@ -361,7 +358,7 @@ are matched by key against DOC's tickets."
       (let ((key (plist-get result :key))
             (attachments (plist-get result :attachments))
             (description (org-tickets--phase-1-result-description doc result)))
-        (when (and key (> (length key) 0))
+        (when (org-tickets--non-empty-string key)
           (push (org-tickets--make-attachment-thunk key attachments org-buffer
                                                  description)
                 thunks))))

@@ -164,11 +164,6 @@ VERSION is the Fix Version string (e.g., \"Aug2026\")."
 Both are payload fields (`duedate' and `fixVersions'), so inheritance
 has to happen before the sync builds its requests.")
 
-(defun org-tickets--heading-property (property)
-  "Return the non-empty PROPERTY of the heading at point, or nil."
-  (let ((value (org-entry-get (point) property)))
-    (and value (> (length value) 0) value)))
-
 (defun org-tickets--fields-due-date (fields)
   "Return the duedate in Jira issue FIELDS, or nil."
   (org-tickets--alist-get "duedate" fields))
@@ -211,7 +206,7 @@ Only properties in `org-tickets--remote-inherited-fields' are looked up."
       (let ((value (funcall extract
                             (org-tickets--alist-get
                              "fields" (org-tickets--remote-parent-issue parent-key)))))
-        (and (stringp value) (> (length value) 0) value)))))
+        (and (stringp value) (not (string-blank-p value)) value)))))
 
 (defun org-tickets--ancestor-property (property)
   "Return PROPERTY of the nearest ancestor ticket heading carrying it, or nil."
@@ -468,7 +463,7 @@ BLOCKED-BY entries block KEY.  Links from a ticket to itself are dropped."
                           (org-tickets--ticket-parent-key ticket)))
          (targets (seq-remove
                    (lambda (to) (string= key to))
-                   (append (and parent-key (> (length parent-key) 0)
+                   (append (and (org-tickets--non-empty-string parent-key)
                                 (list parent-key))
                            (org-tickets--ticket-blocks ticket))))
          (blockers (seq-remove (lambda (from) (string= key from))
@@ -483,7 +478,7 @@ concurrently via `org-tickets--async-batch'.  _ORG-BUFFER is unused;
 TICKET's marker locates its heading.  CALLBACK is called when all complete."
   (let* ((key (or (org-tickets--ticket-key ticket)
                   (org-tickets--ticket-buffer-key ticket)))
-         (thunks (and (stringp key) (> (length key) 0)
+         (thunks (and (org-tickets--non-empty-string key)
                       (org-tickets--ticket-link-thunks ticket key))))
     (if thunks
         (org-tickets--async-batch thunks (lambda (_results) (funcall callback)))

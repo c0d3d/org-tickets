@@ -84,11 +84,23 @@ features must be level 1 and other tickets level 1 or 2"
   "Append VALUE to the comma-separated org PROPERTY on the heading at point.
 An empty or absent property becomes VALUE; otherwise VALUE is appended
 after a comma.  Point must already be on the target heading."
-  (let ((current (or (org-entry-get (point) property) "")))
+  (let ((current (org-tickets--heading-property property)))
     (org-entry-put (point) property
-                   (if (string= current "")
-                       value
-                     (concat current "," value)))))
+                   (if current (concat current "," value) value))))
+
+(defun org-tickets--non-empty-string (value)
+  "Return VALUE when it is a string with non-whitespace content, else nil."
+  (and (stringp value) (not (string-blank-p value)) value))
+
+(defun org-tickets--heading-property (property)
+  "Return the trimmed PROPERTY of the heading at point, or nil if empty."
+  (let ((value (org-tickets--non-empty-string (org-entry-get (point) property))))
+    (and value (string-trim value))))
+
+(defun org-tickets--csv-property (property)
+  "Return the comma-separated PROPERTY at point as a list of trimmed strings.
+Blank entries are dropped; an absent or blank property gives nil."
+  (split-string (or (org-entry-get (point) property) "") "," t "[ \t]+"))
 
 (defun org-tickets--valid-ticket-key-p (key)
   "Return non-nil if KEY looks like a valid Jira ticket key (e.g. PROJ-123)."
@@ -136,51 +148,48 @@ both batches and never reach Jira."
     (seq-remove (lambda (ticket) (memq ticket features))
                 (org-tickets--doc-tickets doc))))
 
+(defun org-tickets--valid-parent-property (title)
+  "Return the PARENT property at point if it is a valid key, else nil.
+An invalid value is reported via `message' using the ticket's key or TITLE."
+  (let ((parent (org-tickets--heading-property "PARENT")))
+    (cond ((null parent) nil)
+          ((org-tickets--valid-ticket-key-p parent) parent)
+          (t (message "org-tickets: ignoring invalid PARENT value %S on %s"
+                      parent (or (org-tickets--heading-property "JIRA_KEY")
+                                 title))
+             nil))))
+
 (defun org-tickets--parse-ticket-at-point ()
   "Parse a ticket from the org heading at point.
 Returns an org-tickets--ticket struct or nil if not a valid ticket."
-  (let* ((element (org-element-at-point))
-         (title (or (org-element-property :raw-value element) ""))
-         (node element)
-         (type-prop (org-entry-get (point) "JIRA_TYPE"))
-         (key-prop (org-entry-get (point) "JIRA_KEY"))
-         (fix-version (org-entry-get (point) "FIX_VERSION"))
-         (labels-str (org-entry-get (point) "LABELS"))
-         (story-points-str (org-entry-get (point) "STORY_POINTS"))
-         (blocks-str (org-entry-get (point) "BLOCKS"))
-         (blocked-by-str (org-entry-get (point) "BLOCKED-BY"))
-         (parent-str (org-entry-get (point) "PARENT"))
-         (sprint-str (org-entry-get (point) "SPRINT"))
-         (due-date-str (org-entry-get (point) "DUE_DATE")))
-
+  (let ((element (org-element-at-point))
+        (type-prop (org-entry-get (point) "JIRA_TYPE"))
+        (story-points-str (org-entry-get (point) "STORY_POINTS")))
     (when type-prop
-      (org-tickets--check-ticket-level
-       type-prop title (org-element-property :level element))
-      (org-tickets--ticket-create
-       :key key-prop
-       :type type-prop
-       :summary title
-       :description (org-tickets--get-ticket-description node)
-       :fix-version fix-version
-       :labels (and (> (length labels-str) 0) (split-string labels-str "," t))
-       :story-points (and (> (length story-points-str) 0) (string-to-number story-points-str))
-       :blocks (and (> (length blocks-str) 0) (split-string blocks-str "," t))
-       :blocked-by (and (> (length blocked-by-str) 0) (split-string blocked-by-str "," t))
-       :parent (and (> (length parent-str) 0)
-                    (if (org-tickets--valid-ticket-key-p parent-str)
-                        parent-str
-                      (message "org-tickets: ignoring invalid PARENT value %S on %s"
-                               parent-str (or key-prop title))
-                      nil))
-       :sprint (and (> (length sprint-str) 0) sprint-str)
-       :due-date (and (> (length due-date-str) 0) due-date-str)
-       :attachments nil  ; Populated from Jira during sync
-       :marker (copy-marker (org-element-property :begin element))
-       :clear-labels (and labels-str
-                          (null (split-string labels-str "," t)))
-       :clear-story-points (and story-points-str
-                                (or (string= (string-trim story-points-str) "")
-                                    (= 0 (string-to-number story-points-str))))))))
+      (let ((title (or (org-element-property :raw-value element) ""))
+            (labels (org-tickets--csv-property "LABELS"))
+            (story-points (org-tickets--heading-property "STORY_POINTS")))
+        (org-tickets--check-ticket-level
+         type-prop title (org-element-property :level element))
+        (org-tickets--ticket-create
+         :key (org-entry-get (point) "JIRA_KEY")
+         :type type-prop
+         :summary title
+         :description (org-tickets--get-ticket-description element)
+         :fix-version (org-entry-get (point) "FIX_VERSION")
+         :labels labels
+         :story-points (and story-points (string-to-number story-points))
+         :blocks (org-tickets--csv-property "BLOCKS")
+         :blocked-by (org-tickets--csv-property "BLOCKED-BY")
+         :parent (org-tickets--valid-parent-property title)
+         :sprint (org-tickets--heading-property "SPRINT")
+         :due-date (org-tickets--heading-property "DUE_DATE")
+         :attachments nil  ; Populated from Jira during sync
+         :marker (copy-marker (org-element-property :begin element))
+         :clear-labels (and (org-entry-get (point) "LABELS") (null labels))
+         :clear-story-points (and story-points-str
+                                  (or (null story-points)
+                                      (= 0 (string-to-number story-points)))))))))
 
 (defun org-tickets--description-end (limit)
   "Return where the description of the ticket heading at point ends.
@@ -217,8 +226,7 @@ child headings are included.  Returns nil if it is empty."
   "Add KEY to the BLOCKS property of ticket BLOCKER-KEY unless already listed.
 Keys are compared exactly, not as substrings.  Point is preserved."
   (org-tickets--with-ticket-at-key blocker-key
-    (let ((current (split-string (or (org-entry-get (point) "BLOCKS") "")
-                                 "," t "[ \t]+")))
+    (let ((current (org-tickets--csv-property "BLOCKS")))
       (unless (member key current)
         (org-tickets--append-csv-property "BLOCKS" key)))))
 
@@ -226,7 +234,7 @@ Keys are compared exactly, not as substrings.  Point is preserved."
   "Return the BLOCKED-BY keys of TICKET whose BLOCKS need updating.
 Nil when TICKET has no key; empty keys and TICKET's own key are dropped."
   (let ((key (org-tickets--ticket-key ticket)))
-    (and key (not (string-empty-p key))
+    (and (org-tickets--non-empty-string key)
          (seq-remove (lambda (b) (or (string-empty-p b) (string= b key)))
                      (org-tickets--ticket-blocked-by ticket)))))
 
@@ -248,9 +256,8 @@ never the heading itself."
     (let ((found nil))
       (while (and (not found) (org-up-heading-safe))
         (let ((type (org-entry-get (point) "JIRA_TYPE"))
-              (key (org-entry-get (point) "JIRA_KEY")))
-          (when (and (org-tickets--parent-type-p type)
-                     key (> (length key) 0))
+              (key (org-tickets--heading-property "JIRA_KEY")))
+          (when (and (org-tickets--parent-type-p type) key)
             (setq found key))))
       found)))
 

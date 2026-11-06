@@ -622,3 +622,44 @@ Description.
     (should-not (org-tickets--valid-ticket-key-p key))))
 
 (provide (quote org-tickets-test-parse))
+
+;;;; Whitespace-only properties
+
+(ert-deftest org-tickets-test--whitespace-only-properties-are-empty ()
+  "Whitespace-only PARENT, SPRINT and DUE_DATE parse as absent.
+A whitespace-only LABELS or STORY_POINTS still means \"clear\"."
+  (with-temp-buffer
+    (insert "* Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:LABELS:   \n"
+            ":PARENT:  \n:SPRINT:  \n:DUE_DATE:   \n:STORY_POINTS:  \n:END:\n")
+    (org-mode)
+    (goto-char (point-min))
+    (let ((tk (org-tickets--parse-ticket-at-point)))
+      (should-not (org-tickets--ticket-labels tk))
+      (should-not (org-tickets--ticket-parent tk))
+      (should-not (org-tickets--ticket-sprint tk))
+      (should-not (org-tickets--ticket-due-date tk))
+      (should (org-tickets--ticket-clear-labels tk))
+      (should (org-tickets--ticket-clear-story-points tk)))))
+
+(ert-deftest org-tickets-test--csv-properties-trim-entries ()
+  "Comma-separated properties drop blank entries and surrounding spaces."
+  (with-temp-buffer
+    (insert "* Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:LABELS: a , b,\n"
+            ":BLOCKS: P-1 , P-2\n:BLOCKED-BY: , \n:END:\n")
+    (org-mode)
+    (goto-char (point-min))
+    (let ((tk (org-tickets--parse-ticket-at-point)))
+      (should (equal (org-tickets--ticket-labels tk) '("a" "b")))
+      (should (equal (org-tickets--ticket-blocks tk) '("P-1" "P-2")))
+      (should-not (org-tickets--ticket-blocked-by tk))
+      (should-not (org-tickets--ticket-clear-labels tk)))))
+
+(ert-deftest org-tickets-test--blank-csv-labels-clear ()
+  "A LABELS value holding only separators and spaces clears labels."
+  (with-temp-buffer
+    (insert "* Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:LABELS: , ,\n:END:\n")
+    (org-mode)
+    (goto-char (point-min))
+    (let ((tk (org-tickets--parse-ticket-at-point)))
+      (should-not (org-tickets--ticket-labels tk))
+      (should (org-tickets--ticket-clear-labels tk)))))
