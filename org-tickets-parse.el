@@ -91,8 +91,9 @@ after a comma.  Point must already be on the target heading."
 
 (defun org-tickets--valid-ticket-key-p (key)
   "Return non-nil if KEY looks like a valid Jira ticket key (e.g. PROJ-123)."
-  (and (stringp key)
-       (string-match-p "\\`[A-Z]+-[0-9]+\\'" key)))
+  (let ((case-fold-search nil))
+    (and (stringp key)
+         (string-match-p "\\`[A-Z][A-Z0-9_]*-[0-9]+\\'" key))))
 
 ;;;; Ticket Parsing from Org
 

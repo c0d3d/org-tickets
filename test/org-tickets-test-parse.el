@@ -619,4 +619,10 @@ Description.
   (should (equal (org-tickets-test--blocks-of-5-after-resolving 2)
                  "PROJ-12,PROJ-1")))
 
+(ert-deftest org-tickets-test--valid-ticket-key-forms ()
+  (dolist (key '("PROJ-1" "AB2-12" "A_B-7"))
+    (should (org-tickets--valid-ticket-key-p key)))
+  (dolist (key '("2AB-1" "ab-1" "PROJ-" "PROJ-1x" "-1" nil))
+    (should-not (org-tickets--valid-ticket-key-p key))))
+
 (provide (quote org-tickets-test-parse))
