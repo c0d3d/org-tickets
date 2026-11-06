@@ -223,17 +223,22 @@ Keys are compared exactly, not as substrings.  Point is preserved."
       (unless (member key current)
         (org-tickets--append-csv-property "BLOCKS" key)))))
 
+(defun org-tickets--ticket-blockers (ticket)
+  "Return the BLOCKED-BY keys of TICKET whose BLOCKS need updating.
+Nil when TICKET has no key; empty keys and TICKET's own key are dropped."
+  (let ((key (org-tickets--ticket-key ticket)))
+    (and key (not (string-empty-p key))
+         (seq-remove (lambda (b) (or (string-empty-p b) (string= b key)))
+                     (org-tickets--ticket-blocked-by ticket)))))
+
 (defun org-tickets--resolve-blocked-by-in-org (doc)
   "Update org buffer BLOCKS properties from BLOCKED-BY relationships in DOC.
 For each ticket with a BLOCKED-BY property, ensure the referenced ticket's
 BLOCKS property includes the current ticket's key."
   (dolist (ticket (org-tickets--doc-tickets doc))
-    (let ((key (org-tickets--ticket-key ticket)))
-      (unless (or (null key) (string-empty-p key))
-        (dolist (blocker-key (seq-remove
-                              (lambda (b) (or (string-empty-p b) (string= b key)))
-                              (org-tickets--ticket-blocked-by ticket)))
-          (org-tickets--ensure-blocks-entry blocker-key key))))))
+    (dolist (blocker (org-tickets--ticket-blockers ticket))
+      (org-tickets--ensure-blocks-entry
+       blocker (org-tickets--ticket-key ticket)))))
 
 (defun org-tickets--find-parent-ticket-key ()
   "Return the JIRA_KEY of the nearest ancestor Feature/Improvement.
