@@ -100,10 +100,29 @@ When a test file exceeds 750 lines, split by category (e.g., `org-tickets-test-a
 Any test that drives the whole pipeline uses these; keep them here rather
 than in one suite so the others can reuse them.
 
-### Attachment test helpers (`org-tickets-test-attachments-upload.el`)
+### ADF and ticket helpers (`org-tickets-test-fixtures.el`)
 
-- `org-tickets-test--uuid-attach-path` — converts UUID to org-attach's `first2/rest` dir format
-- `org-tickets-test--with-attach-env` — macro that sets up temp attach dir, creates files, org buffer, mocks `org-attach-dir` and `org-tickets--async-upload-attachment`, and cleans up. Binds `uploaded-to` in BODY.
+No test file may `require` another test file; shared helpers live in the
+fixtures file.
+
+- Push side (org -> ADF): `--adf-blocks ORG`, `--adf-outline ORG`
+  (`(LEVEL-OR-TYPE . TEXT)` pairs), `--adf-first-paragraph ORG`,
+  `--inline-summary ORG`, `--adf-texts NODES`, `--block-type`,
+  `--block-text`, `--adf-heading-level BLOCK`.
+- Pull side (ADF -> org): `--adf-doc &rest BLOCKS`, `--adf-heading LEVEL TEXT
+  &optional MARKS`, `--adf-para TEXT` build API-shaped ADF; `--pull
+  ADF-OR-JSON` imports either to org text.
+- `--roundtrip ORG` / `--roundtrip-n ORG N` — push then pull (N times).
+- Ticket buffers: `--ticket-text STARS TYPE TITLE BODY &optional KEY`,
+  `--parse-tickets TEXT`, `--description-of TEXT TITLE`, `--pushed-outline TEXT TITLE`,
+  `--reported-item` (shared sample list item), `--parent-types`,
+  `--with-org-buffer-at TEXT TARGET` (macro), `--prop-of KEY PROP`.
+- `--with-attach-env` — macro that sets up a temp attach dir, creates files,
+  an org buffer, mocks `org-attach-dir` and `org-tickets--async-upload-attachment`,
+  and cleans up. Binds `uploaded-to` in BODY. `--uuid-attach-path` converts a
+  UUID to org-attach's `first2/rest` dir format.
+
+(All names carry the `org-tickets-test` prefix.)
 
 ## Testing with Real Jira API
 

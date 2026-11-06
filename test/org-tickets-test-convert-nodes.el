@@ -21,37 +21,14 @@
 (require 'org-element)
 
 (require 'org-tickets)
+(require 'org-tickets-test-fixtures)
 
 ;;;; Helpers
-
-(defun org-tickets-test--flatten-adf-text (adf-elements)
-  "Extract all text content from ADF ELEMENTS, a list of content nodes.
-Test-only helper: walks nested \"content\" the way an ADF renderer
-would, returning the list of text strings regardless of which node
-carries them.  Not a production function — org-tickets-convert.el has no
-need to flatten ADF back to text."
-  (mapcan (lambda (elem)
-            (when (listp elem)
-              (let ((text (cdr (assoc "text" elem))))
-                (if text
-                    (list text)
-                  (let ((content (cdr (assoc "content" elem))))
-                    (when content
-                      (org-tickets-test--flatten-adf-text content)))))))
-          adf-elements))
-
-(defun org-tickets-test--adf-top-content (content)
-  "Return the top-level ADF content node list for org CONTENT string."
-  (cdr (assoc "content" (org-tickets--build-adf-description content))))
 
 (defun org-tickets-test--adf-flat-text (content)
   "Return all ADF text for org CONTENT string concatenated into one string."
   (apply #'concat
-         (org-tickets-test--flatten-adf-text (org-tickets-test--adf-top-content content))))
-
-(defun org-tickets-test--first-paragraph-nodes (content)
-  "Return the inline node list of the first paragraph for org CONTENT."
-  (cdr (assoc "content" (car (org-tickets-test--adf-top-content content)))))
+         (org-tickets-test--adf-texts (org-tickets-test--adf-blocks content))))
 
 (defun org-tickets-test--node-mark-types (node)
   "Return the list of ADF mark type strings on NODE."
@@ -72,7 +49,7 @@ need to flatten ADF back to text."
 
 (ert-deftest org-tickets-test--adf-inline-src-block-code-mark ()
   "Inline source keeps its code and gets a code mark."
-  (let* ((nodes (org-tickets-test--first-paragraph-nodes "run src_python{print(1)} now"))
+  (let* ((nodes (org-tickets-test--adf-first-paragraph "run src_python{print(1)} now"))
          (node (seq-find (lambda (n)
                            (string-prefix-p "print(1)" (or (cdr (assoc "text" n)) "")))
                          nodes)))
@@ -87,7 +64,7 @@ backtick styling over the trailing space."
   (dolist (case '(("This is ~code~ text" . "code")
                   ("This is =verbatim= text" . "verbatim")
                   ("run src_python{print(1)} now" . "print(1)")))
-    (let* ((nodes (org-tickets-test--first-paragraph-nodes (car case)))
+    (let* ((nodes (org-tickets-test--adf-first-paragraph (car case)))
            (node (seq-find
                   (lambda (n)
                     (member "code" (org-tickets-test--node-mark-types n)))
@@ -98,7 +75,7 @@ backtick styling over the trailing space."
 
 (ert-deftest org-tickets-test--adf-example-block-code-block ()
   "An example block becomes a codeBlock preserving its interior lines."
-  (let ((block (car (org-tickets-test--adf-top-content
+  (let ((block (car (org-tickets-test--adf-blocks
                      "#+begin_example\nkeep me\nline2\n#+end_example"))))
     (should (equal (cdr (assoc "type" block)) "codeBlock"))
     (should (equal (cdr (assoc "text" (car (cdr (assoc "content" block)))))
@@ -106,7 +83,7 @@ backtick styling over the trailing space."
 
 (ert-deftest org-tickets-test--adf-fixed-width-code-block ()
   "Fixed-width (colon) lines become a codeBlock, not dropped."
-  (let* ((block (car (org-tickets-test--adf-top-content ": colon one\n: colon two")))
+  (let* ((block (car (org-tickets-test--adf-blocks ": colon one\n: colon two")))
          (text (cdr (assoc "text" (car (cdr (assoc "content" block)))))))
     (should (equal (cdr (assoc "type" block)) "codeBlock"))
     (should (string-match-p "colon one" text))
@@ -115,7 +92,7 @@ backtick styling over the trailing space."
 (ert-deftest org-tickets-test--adf-horizontal-rule ()
   "A horizontal rule becomes an ADF rule node, not dropped."
   (let ((types (mapcar (lambda (n) (cdr (assoc "type" n)))
-                       (org-tickets-test--adf-top-content "above\n\n-----\n\nbelow"))))
+                       (org-tickets-test--adf-blocks "above\n\n-----\n\nbelow"))))
     (should (member "rule" types))))
 
 (ert-deftest org-tickets-test--adf-statistics-cookie-preserved ()
@@ -130,7 +107,7 @@ backtick styling over the trailing space."
 
 (ert-deftest org-tickets-test--adf-latex-environment-code-block ()
   "A latex environment becomes a codeBlock preserving its source."
-  (let* ((block (car (org-tickets-test--adf-top-content
+  (let* ((block (car (org-tickets-test--adf-blocks
                       "\\begin{equation}\nx=1\n\\end{equation}")))
          (text (cdr (assoc "text" (car (cdr (assoc "content" block)))))))
     (should (equal (cdr (assoc "type" block)) "codeBlock"))
@@ -139,7 +116,7 @@ backtick styling over the trailing space."
 
 (ert-deftest org-tickets-test--adf-export-block-code-block ()
   "An export block becomes a codeBlock preserving its body."
-  (let* ((block (car (org-tickets-test--adf-top-content
+  (let* ((block (car (org-tickets-test--adf-blocks
                       "#+begin_export html\n<b>hi</b>\n#+end_export")))
          (text (cdr (assoc "text" (car (cdr (assoc "content" block)))))))
     (should (equal (cdr (assoc "type" block)) "codeBlock"))
@@ -154,7 +131,7 @@ backtick styling over the trailing space."
 
 (ert-deftest org-tickets-test--adf-strike-through-mark ()
   "Strike-through text carries an ADF strike mark."
-  (let* ((nodes (org-tickets-test--first-paragraph-nodes "a +struck+ b"))
+  (let* ((nodes (org-tickets-test--adf-first-paragraph "a +struck+ b"))
          (node (seq-find (lambda (n)
                            (string-prefix-p "struck" (or (cdr (assoc "text" n)) "")))
                          nodes)))
@@ -163,7 +140,7 @@ backtick styling over the trailing space."
 
 (ert-deftest org-tickets-test--adf-underline-mark ()
   "Underlined text carries an ADF underline mark."
-  (let* ((nodes (org-tickets-test--first-paragraph-nodes "a _under_ b"))
+  (let* ((nodes (org-tickets-test--adf-first-paragraph "a _under_ b"))
          (node (seq-find (lambda (n)
                            (string-prefix-p "under" (or (cdr (assoc "text" n)) "")))
                          nodes)))
@@ -173,7 +150,7 @@ backtick styling over the trailing space."
 (defun org-tickets-test--subsup-node (content text)
   "Return the first-paragraph node for org CONTENT whose text is TEXT."
   (seq-find (lambda (n) (equal (cdr (assoc "text" n)) text))
-            (org-tickets-test--first-paragraph-nodes content)))
+            (org-tickets-test--adf-first-paragraph content)))
 
 (ert-deftest org-tickets-test--adf-braced-subscript-mark ()
   "A braced subscript like H_{2}O carries an ADF subsup mark of type sub."
@@ -192,16 +169,16 @@ backtick styling over the trailing space."
 
 (ert-deftest org-tickets-test--adf-quote-block-blockquote ()
   "A quote block becomes an ADF blockquote wrapping its paragraphs."
-  (let ((block (car (org-tickets-test--adf-top-content
+  (let ((block (car (org-tickets-test--adf-blocks
                      "#+begin_quote\nquoted line\n#+end_quote"))))
     (should (equal (cdr (assoc "type" block)) "blockquote"))
     (should (string-match-p
              "quoted line"
-             (apply #'concat (org-tickets-test--flatten-adf-text (list block)))))))
+             (apply #'concat (org-tickets-test--adf-texts (list block)))))))
 
 (ert-deftest org-tickets-test--adf-verse-block-preserves-lines ()
   "A verse block becomes a paragraph whose interior newlines are hardBreaks."
-  (let* ((para (car (org-tickets-test--adf-top-content
+  (let* ((para (car (org-tickets-test--adf-blocks
                      "#+begin_verse\nline a\nline b\n#+end_verse")))
          (nodes (cdr (assoc "content" para)))
          (types (mapcar (lambda (n) (cdr (assoc "type" n))) nodes))
@@ -243,31 +220,22 @@ backtick styling over the trailing space."
 
 ;;;; Headlines: org level 3 is h1
 
-(defun org-tickets-test--adf-blocks (org-text)
-  "Return the top-level ADF blocks pushed for ORG-TEXT."
-  (cdr (assoc "content" (org-tickets--build-adf-description org-text))))
-
-(defun org-tickets-test--heading-level (block)
-  "Return BLOCK's heading level, or nil when BLOCK is not a heading."
-  (when (equal (cdr (assoc "type" block)) "heading")
-    (cdr (assoc "level" (cdr (assoc "attrs" block))))))
-
 (ert-deftest org-tickets-test--headline-level-3-is-h1-with-body ()
   "A *** headline pushes as an h1 followed by its body."
   (let ((blocks (org-tickets-test--adf-blocks "*** Overview\nBody text.")))
     (should (= (length blocks) 2))
-    (should (= (org-tickets-test--heading-level (nth 0 blocks)) 1))
-    (should (equal (org-tickets-test--flatten-adf-text (list (nth 0 blocks)))
+    (should (= (org-tickets-test--adf-heading-level (nth 0 blocks)) 1))
+    (should (equal (org-tickets-test--adf-texts (list (nth 0 blocks)))
                    '("Overview")))
     (should (equal (cdr (assoc "type" (nth 1 blocks))) "paragraph"))
-    (should (equal (org-tickets-test--flatten-adf-text (list (nth 1 blocks)))
+    (should (equal (org-tickets-test--adf-texts (list (nth 1 blocks)))
                    '("Body text.")))))
 
 (ert-deftest org-tickets-test--headline-levels-nest-and-clamp ()
   "Each extra star is one heading level deeper, capped at h6."
   (let ((blocks (org-tickets-test--adf-blocks
                  "*** A\n**** B\n********* C")))
-    (should (equal (mapcar #'org-tickets-test--heading-level blocks)
+    (should (equal (mapcar #'org-tickets-test--adf-heading-level blocks)
                    '(1 2 6)))))
 
 (ert-deftest org-tickets-test--headline-title-keeps-inline-marks ()

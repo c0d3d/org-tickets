@@ -14,43 +14,8 @@
 (require 'seq)
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
-(require 'org-tickets-test-roundtrip)
 
 ;;;; Helpers
-
-(defun org-tickets-test--paragraph-inlines (org-text)
-  "Return the inline nodes of the first paragraph pushed for ORG-TEXT."
-  (let ((found nil))
-    (named-let walk ((nodes (cdr (assoc "content"
-                                        (org-tickets--build-adf-description org-text)))))
-      (dolist (node nodes)
-        (unless found
-          (if (equal (cdr (assoc "type" node)) "paragraph")
-              (setq found (cdr (assoc "content" node)))
-            (walk (cdr (assoc "content" node)))))))
-    found))
-
-(defun org-tickets-test--inline-summary (org-text)
-  "Summarize ORG-TEXT's first paragraph as texts and the symbol `br'."
-  (mapcar (lambda (node)
-            (if (equal (cdr (assoc "type" node)) "hardBreak")
-                'br
-              (cdr (assoc "text" node))))
-          (org-tickets-test--paragraph-inlines org-text)))
-
-(defun org-tickets-test--roundtrip-n (org-text n)
-  "Push and pull ORG-TEXT N times; return the final text."
-  (dotimes (_ n org-text)
-    (setq org-text (org-tickets-test--roundtrip org-text))))
-
-(defconst org-tickets-test--reported-item
-  (concat "1. We then need to sign the header, which occupies the range "
-          "~[0x0000, 0x1000)~ (inclusive left, exclusive right, offset "
-          "~0x1000~ is the first byte of the prolog, which was included in "
-          "the payload hash).\n"
-          "   That signature should be done with ECDSA using SHA-384 and a "
-          "Nist P-384 key.")
-  "The ordered item from the bug report.")
 
 ;;;; Push: no indentation after a line break
 
@@ -126,11 +91,6 @@
          (list-node (car (cdr (assoc "content" adf))))
          (item (car (cdr (assoc "content" list-node)))))
     (cdr (assoc "content" item))))
-
-(defun org-tickets-test--block-text (block)
-  "Return the concatenated text of BLOCK's inline nodes."
-  (mapconcat (lambda (n) (or (cdr (assoc "text" n)) ""))
-             (cdr (assoc "content" block)) ""))
 
 (ert-deftest org-tickets-test--list-item-content-after-nested-list-keeps-order ()
   (let ((blocks (org-tickets-test--first-item-blocks

@@ -11,15 +11,6 @@
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-(defun org-tickets-test--roundtrip (org-text)
-  "Push ORG-TEXT to ADF, encode/decode as the API would, pull it back."
-  (let ((adf (org-tickets--build-adf-description org-text)))
-    (should adf)
-    ;; Serialize through JSON so the pull side sees symbol keys,
-    ;; exactly like a real GET response.
-    (org-tickets--parse-adf-description
-     (org-tickets-test--json (json-encode adf)))))
-
 (ert-deftest org-tickets-test--roundtrip-paragraphs ()
   (should (equal (org-tickets-test--roundtrip "one\n\ntwo") "one\n\ntwo")))
 

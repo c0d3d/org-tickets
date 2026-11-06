@@ -11,8 +11,6 @@
 (require 'ert)
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
-(require 'org-tickets-test-roundtrip)
-(require 'org-tickets-test-list-continuation)
 
 ;;;; Helpers
 
@@ -28,10 +26,6 @@ ORDER is the \"order\" attribute, or nil when absent."
             (push (cons type (cdr (assoc "order" (cdr (assoc "attrs" node))))) found)))
         (walk (cdr (assoc "content" node)))))
     (nreverse found)))
-
-(defun org-tickets-test--pull-list (json)
-  "Import an ADF doc given as JSON text."
-  (org-tickets--parse-adf-description (org-tickets-test--json json)))
 
 ;;;; Push
 
@@ -106,7 +100,7 @@ ORDER is the \"order\" attribute, or nil when absent."
 ;;;; Pull
 
 (ert-deftest org-tickets-test--ordered-start-pull-order ()
-  (should (equal (org-tickets-test--pull-list
+  (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"orderedList\",\"attrs\":{\"order\":4},
                     \"content\":[
                      {\"type\":\"listItem\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}]},
@@ -114,20 +108,20 @@ ORDER is the \"order\" attribute, or nil when absent."
                  "4. a\n5. b")))
 
 (ert-deftest org-tickets-test--ordered-start-pull-no-attrs-is-one ()
-  (should (equal (org-tickets-test--pull-list
+  (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"orderedList\",\"content\":[
                      {\"type\":\"listItem\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}]}]}]}")
                  "1. a")))
 
 (ert-deftest org-tickets-test--ordered-start-pull-zero ()
-  (should (equal (org-tickets-test--pull-list
+  (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"orderedList\",\"attrs\":{\"order\":0},\"content\":[
                      {\"type\":\"listItem\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}]}]}]}")
                  "0. a")))
 
 (ert-deftest org-tickets-test--ordered-start-pull-wide-marker-continuation ()
   "Continuations align under a wide marker's text."
-  (should (equal (org-tickets-test--pull-list
+  (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"orderedList\",\"attrs\":{\"order\":10},\"content\":[
                      {\"type\":\"listItem\",\"content\":[{\"type\":\"paragraph\",\"content\":[
                        {\"type\":\"text\",\"text\":\"a\"},{\"type\":\"hardBreak\"},{\"type\":\"text\",\"text\":\"b\"}]}]}]}]}")
@@ -135,7 +129,7 @@ ORDER is the \"order\" attribute, or nil when absent."
 
 (ert-deftest org-tickets-test--ordered-start-pull-bullet-list-ignores-order ()
   "An order attribute on a bulletList does not produce numbers."
-  (should (equal (org-tickets-test--pull-list
+  (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"bulletList\",\"attrs\":{\"order\":4},\"content\":[
                      {\"type\":\"listItem\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}]}]}]}")
                  "- a")))

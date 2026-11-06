@@ -15,7 +15,6 @@
 (require 'org)
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
-(require 'org-tickets-test-headings-push)
 
 ;;;; Helpers
 
@@ -28,20 +27,9 @@
           (org-tickets-test--ticket-text
            "*" "Bug" "T" "**** T-Step\ns-body\n" "P-3")))
 
-(defmacro org-tickets-test--at (text target &rest body)
-  "Run BODY in an org buffer of TEXT with point at the start of TARGET."
-  (declare (indent 2))
-  `(with-temp-buffer
-     (insert ,text)
-     (org-mode)
-     (goto-char (point-min))
-     (search-forward ,target)
-     (goto-char (match-beginning 0))
-     ,@body))
-
 (defun org-tickets-test--owner-title (text target)
   "Return the title of the ticket heading owning TARGET in TEXT."
-  (org-tickets-test--at text target
+  (org-tickets-test--with-org-buffer-at text target
     (let ((pos (org-tickets--ticket-heading-position)))
       (when pos
         (goto-char pos)
@@ -93,7 +81,7 @@
 
 (ert-deftest org-tickets-test--owner-lookup-keeps-point ()
   "Finding the owner, and running BODY there, leaves point alone."
-  (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "e-body"
+  (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "e-body"
     (let ((start (point)))
       (org-tickets--ticket-heading-position)
       (should (= (point) start))
@@ -102,7 +90,7 @@
 
 (ert-deftest org-tickets-test--owner-of-folded-description-heading ()
   "Invisible (folded) description headings still resolve."
-  (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "**** S-Edge"
+  (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "**** S-Edge"
     (let ((start (point)))
       (goto-char (point-min))
       (org-cycle-overview)
@@ -117,7 +105,7 @@
         (org-tickets-base-url "https://x.test"))
     (org-tickets-test--with-stubs ((kill-new (lambda (url) (setq copied url)))
                                    (message #'ignore))
-      (org-tickets-test--at text target
+      (org-tickets-test--with-org-buffer-at text target
         (org-tickets-copy-link)))
     copied))
 
@@ -144,13 +132,13 @@
   "An unsynced Story's description must not copy its parent's link."
   (let ((text (concat (org-tickets-test--ticket-text "*" "Feature" "F" "" "P-1")
                       (org-tickets-test--ticket-text "**" "Story" "S" "*** H\n"))))
-    (org-tickets-test--at text "*** H"
+    (org-tickets-test--with-org-buffer-at text "*** H"
       (let ((org-tickets-base-url "https://x.test"))
         (should-error (org-tickets-copy-link) :type 'user-error)))))
 
 (ert-deftest org-tickets-test--copy-link-keeps-point ()
   (org-tickets-test--with-stubs ((kill-new #'ignore) (message #'ignore))
-    (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "r-body"
+    (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "r-body"
       (let ((start (point))
             (org-tickets-base-url "https://x.test"))
         (org-tickets-copy-link)
@@ -187,7 +175,7 @@ HEADING is the title of the heading at point when FN ran."
   "attach-add attaches to the Story, and its ID lands on the Story."
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
-      (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "**** S-Edge"
+      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "**** S-Edge"
         (org-tickets-attach-add "/tmp/a.png")
         (should (equal (alist-get 'attach calls) "S"))
         (should (equal (org-entry-get (point) "ID") nil))
@@ -198,7 +186,7 @@ HEADING is the title of the heading at point when FN ran."
   "An unkeyed ticket still owns attachments added from its description."
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
-      (org-tickets-test--at (org-tickets-test--ticket-text "**" "Story" "New" "*** H\nx\n")
+      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-text "**" "Story" "New" "*** H\nx\n")
           "x\n"
         (org-tickets-attach-add "/tmp/a.png")
         (should (equal (alist-get 'attach calls) "New"))))))
@@ -206,7 +194,7 @@ HEADING is the title of the heading at point when FN ran."
 (ert-deftest org-tickets-test--attach-open-from-description-heading ()
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
-      (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "*** F-Goals"
+      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "*** F-Goals"
         (org-tickets-attach-open)
         (should (equal (alist-get 'reveal calls) "F"))
         (should-not (org-entry-get (point) "ID"))))))
@@ -214,7 +202,7 @@ HEADING is the title of the heading at point when FN ran."
 (ert-deftest org-tickets-test--attach-list-from-description-heading ()
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
-      (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "**** T-Step"
+      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "**** T-Step"
         (org-tickets-attach-list)
         (should (equal (alist-get 'get calls) "P-3"))
         (should (equal (alist-get 'dir calls) "T"))))))
@@ -222,7 +210,7 @@ HEADING is the title of the heading at point when FN ran."
 (ert-deftest org-tickets-test--attach-remove-from-description-heading ()
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
-      (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "**** F-Deep"
+      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "**** F-Deep"
         (org-tickets-attach-remove "a.png")
         (should (equal (alist-get 'delete calls) '("P-1" . "9")))
         (should (equal (alist-get 'dir calls) "F"))))))
@@ -231,7 +219,7 @@ HEADING is the title of the heading at point when FN ran."
   "The interactive prompt completes over the owning ticket's files."
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
-      (org-tickets-test--at (org-tickets-test--ticket-buffer-text) "*** S-Req"
+      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "*** S-Req"
         (call-interactively #'org-tickets-attach-remove)
         (should (equal (seq-uniq (mapcar #'cdr (seq-filter (lambda (c) (eq (car c) 'get))
                                                            calls)))
@@ -242,7 +230,7 @@ HEADING is the title of the heading at point when FN ran."
   (dolist (type org-tickets-test--parent-types)
     (let ((calls nil))
       (org-tickets-test--with-attach-spy calls
-        (org-tickets-test--at (org-tickets-test--ticket-text "*" type "P" "*** H\n" "K-1")
+        (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-text "*" type "P" "*** H\n" "K-1")
             "*** H"
           (org-tickets-attach-list)
           (org-tickets-attach-remove "a.png")
@@ -263,7 +251,7 @@ Return (FETCHED-KEY . NEW-BUFFER-TEXT)."
             (org-tickets--ticket-create :key key :type type :summary "Pulled"
                                         :description description :labels nil)))
          (message #'ignore))
-      (org-tickets-test--at text target
+      (org-tickets-test--with-org-buffer-at text target
         (org-tickets-pull-remote-changes)
         (cons fetched (buffer-substring-no-properties (point-min) (point-max)))))))
 

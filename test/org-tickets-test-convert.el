@@ -27,22 +27,7 @@
 
 ;; Load the main library
 (require 'org-tickets)
-
-(defun org-tickets-test--flatten-adf-text (adf-elements)
-  "Extract all text content from ADF ELEMENTS, a list of content nodes.
-Test-only helper: walks nested \"content\" the way an ADF renderer
-would, returning the list of text strings regardless of which node
-carries them.  Not a production function — org-tickets-convert.el has no
-need to flatten ADF back to text."
-  (mapcan (lambda (elem)
-            (when (listp elem)
-              (let ((text (cdr (assoc "text" elem))))
-                (if text
-                    (list text)
-                  (let ((content (cdr (assoc "content" elem))))
-                    (when content
-                      (org-tickets-test--flatten-adf-text content)))))))
-          adf-elements))
+(require 'org-tickets-test-fixtures)
 
 (ert-deftest org-tickets-test--ordered-list-round-trip ()
   "Regression test: ordered list survives org→ADF→org round-trip.
@@ -522,34 +507,34 @@ Regression test: org-mode stores the space after inline markup in the element's
 emit that space so it is not silently deleted."
   ;; Bold
   (let* ((adf (org-tickets--build-adf-description "This is *bold* text"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "bold text" all)))
   ;; Italic
   (let* ((adf (org-tickets--build-adf-description "This is /italic/ text"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "italic text" all)))
   ;; Code
   (let* ((adf (org-tickets--build-adf-description "This is ~code~ text"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "code text" all)))
   ;; Verbatim
   (let* ((adf (org-tickets--build-adf-description "This is =verbatim= text"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "verbatim text" all)))
   ;; Link
   (let* ((adf (org-tickets--build-adf-description "Click [[https://example.com][here]] now"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "here now" all))))
 
 (ert-deftest org-tickets-test--adf-inline-markup-no-trailing-space-at-end ()
   "Test that inline markup at end of paragraph does not add spurious space."
   (let* ((adf (org-tickets--build-adf-description "End with *bold*"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "with bold" all))
     ;; Should not have trailing space
@@ -561,14 +546,14 @@ Org parses `26_02' as a subscript, dropping the underscore and the
 space that follows.  The ADF output must keep both."
   (let* ((adf (org-tickets--build-adf-description
                "- release/26_02 job server job works"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "release/26_02 job server job works" all))))
 
 (ert-deftest org-tickets-test--adf-superscript-not-consumed ()
   "Regression: a caret token like `x^2' keeps its caret as literal text."
   (let* ((adf (org-tickets--build-adf-description "value x^2 here"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf))))
          (all (mapconcat #'identity texts "")))
     (should (string-match-p "x\\^2 here" all))))
 
@@ -577,7 +562,7 @@ space that follows.  The ADF output must keep both."
 A trailing newline renders as a spurious blank line inside each bullet."
   (let* ((adf (org-tickets--build-adf-description
                "- release/26_02 job works\n- development job works\n- demo"))
-         (texts (org-tickets-test--flatten-adf-text (cdr (assoc "content" adf)))))
+         (texts (org-tickets-test--adf-texts (cdr (assoc "content" adf)))))
     (should texts)
     (dolist (s texts)
       (should-not (string-match-p "\n" s)))))

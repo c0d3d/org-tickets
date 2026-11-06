@@ -37,11 +37,6 @@
 ;; Load the main library
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
-;; `require', not `load-file': in batch mode ERT signals an error on any
-;; re-definition of an existing test, so the shared helpers/tests in the
-;; upload file must load at most once even when this file's loader also
-;; loads the upload file directly.
-(require 'org-tickets-test-attachments-upload)
 
 ;;;; Tests for Bidirectional Attachment Sync
 

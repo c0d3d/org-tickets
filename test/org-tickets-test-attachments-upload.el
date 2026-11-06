@@ -506,45 +506,7 @@ accurately reflect the file's MIME type. Uses mailcap for resolution."
     (should (or (null unknown-type)
                 (string= unknown-type "application/octet-stream")))))
 
-;;;; Test Helpers for Cross-Reference Regression Tests
-
-(defun org-tickets-test--uuid-attach-path (id)
-  "Return the relative path org-attach uses for ID under org-attach-id-dir.
-org-attach splits the ID into a 2-char prefix subdirectory, followed by
-the remaining characters of the ID, matching org-attach's directory layout."
-  (format "%s/%s" (substring id 0 2) (substring id 2)))
-
-(defmacro org-tickets-test--with-attach-env (target-id local-files org-content &rest body)
-  "Set up an org-attach environment for cross-reference regression tests.
-TARGET-ID is the ID property of the ticket heading that should be found.
-LOCAL-FILES is a list of filenames to create in that ticket's attach dir.
-ORG-CONTENT is a string to insert into a temp buffer in org-mode.
-BODY is the test body, which can access `uploaded-to' — a list of
-\(ticket-key . filename) pairs recorded by the mocked upload function."
-  (declare (indent 3))
-  `(let* ((attach-base (expand-file-name (format "test-attach-%s" (gensym))
-                                         temporary-file-directory))
-          (id-subdir (expand-file-name (org-tickets-test--uuid-attach-path ,target-id)
-                                       attach-base))
-          (uploaded-to (list)))
-     (make-directory id-subdir t)
-     (dolist (f ,local-files)
-       (with-temp-file (expand-file-name f id-subdir)
-         (insert "test content")))
-     (unwind-protect
-         (org-tickets-test--with-stubs ((org-tickets--async-upload-attachment
-                                      (lambda (ticket-key file-path callback)
-                                        (push (cons ticket-key (file-name-nondirectory file-path))
-                                              uploaded-to)
-                                        (funcall callback nil nil)))
-                                     (org-attach-dir
-                                      (lambda (&optional _create-if-not-exists-p)
-                                        id-subdir)))
-           (with-temp-buffer
-             (insert ,org-content)
-             (org-mode)
-             ,@body))
-       (delete-directory attach-base t))))
+;;;; Cross-Reference Regression Tests
 
 (ert-deftest org-tickets-test--upload-attachments-cross-reference-bug ()
   "Test that async upload finds correct heading when ticket key appears in another ticket's body.

@@ -393,15 +393,6 @@ but the converter was using string keys with assoc, silently failing."
 
 ;;;; Task A1: description-region correctness
 
-(defun org-tickets-test--adf-paragraph-description (text)
-  "Import a Jira description that is one paragraph holding TEXT."
-  (org-tickets--parse-adf-description
-   (org-tickets-test--json
-    (json-encode
-     `(("type" . "doc") ("version" . 1)
-       ("content" . [(("type" . "paragraph")
-                      ("content" . [(("type" . "text") ("text" . ,text))]))]))))))
-
 (ert-deftest org-tickets-test--pull-preserves-child-subtrees ()
   "Updating a parent's description must not delete its child headings."
   (with-temp-buffer
@@ -467,8 +458,10 @@ but the converter was using string keys with assoc, silently failing."
     (goto-char (point-min))
     (org-tickets--update-org-heading-from-ticket
      (org-tickets--ticket-create :key "P-9" :type "Story" :summary "T"
-                              :description (org-tickets-test--adf-paragraph-description
-                                            "* looks like a heading")
+                              :description (org-tickets-test--pull
+                                              (org-tickets-test--adf-doc
+                                               (org-tickets-test--adf-para
+                                                "* looks like a heading")))
                               :labels nil))
     (goto-char (point-min))
     ;; Exactly one headline in the buffer.
@@ -659,7 +652,9 @@ and | in content is escaped."
     (org-tickets--issue-to-org
      (org-tickets--ticket-create
       :key "P-1" :type "Story" :summary "S"
-      :description (org-tickets-test--adf-paragraph-description "* not a heading")
+      :description (org-tickets-test--pull
+                    (org-tickets-test--adf-doc
+                     (org-tickets-test--adf-para "* not a heading")))
       :labels nil))
     (goto-char (point-min))
     (let ((count 0))

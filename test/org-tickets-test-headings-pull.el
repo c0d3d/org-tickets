@@ -17,33 +17,8 @@
 (require 'org)
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
-(require 'org-tickets-test-headings-push)
-(require 'org-tickets-test-roundtrip)
 
 ;;;; Helpers
-
-(defun org-tickets-test--adf-doc (&rest blocks)
-  "Return a JSON-decoded ADF doc of BLOCKS, shaped like an API response."
-  (org-tickets-test--json
-   (json-encode `(("type" . "doc") ("version" . 1)
-                  ("content" . ,(vconcat blocks))))))
-
-(defun org-tickets-test--adf-heading (level text &optional marks)
-  "Return an ADF heading block at LEVEL holding TEXT with MARKS."
-  (let ((node (list (cons "type" "text") (cons "text" text))))
-    (when marks
-      (setq node (append node (list (cons "marks" (vconcat marks))))))
-    (list (cons "type" "heading")
-          (cons "attrs" (list (cons "level" level)))
-          (cons "content" (vector node)))))
-
-(defun org-tickets-test--adf-para (text)
-  "Return an ADF paragraph block holding TEXT."
-  `(("type" . "paragraph") ("content" . [(("type" . "text") ("text" . ,text))])))
-
-(defun org-tickets-test--import (&rest blocks)
-  "Import an ADF doc of BLOCKS to org description text."
-  (org-tickets--parse-adf-description (apply #'org-tickets-test--adf-doc blocks)))
 
 (defun org-tickets-test--ticket-record (type title description &optional key)
   "Return a ticket record of TYPE, TITLE, DESCRIPTION and KEY."
@@ -68,17 +43,14 @@
      (org-tickets-test--ticket-record type (org-get-heading t t t t) description key))
     (buffer-substring-no-properties (point-min) (point-max))))
 
-(defun org-tickets-test--normalized-adf (org-text)
-  "Push ORG-TEXT and decode the JSON the API would receive."
-  (org-tickets-test--json (json-encode (org-tickets--build-adf-description org-text))))
-
 ;;;; ADF -> org text
 
 (ert-deftest org-tickets-test--headings-pull-each-level ()
   "h1..h6 import as three to eight stars."
-  (should (equal (apply #'org-tickets-test--import
-                        (mapcar (lambda (n) (org-tickets-test--adf-heading n (format "H%d" n)))
-                                '(1 2 3 4 5 6)))
+  (should (equal (org-tickets-test--pull
+                  (apply #'org-tickets-test--adf-doc
+                         (mapcar (lambda (n) (org-tickets-test--adf-heading n (format "H%d" n)))
+                                 '(1 2 3 4 5 6))))
                  (concat "*** H1\n\n**** H2\n\n***** H3\n\n"
                          "****** H4\n\n******* H5\n\n******** H6"))))
 
@@ -92,23 +64,23 @@
 
 (ert-deftest org-tickets-test--headings-pull-marks-in-title ()
   "Marks inside a heading become org markup in the headline."
-  (should (equal (org-tickets-test--import
-                  (org-tickets-test--adf-heading 1 "bold" '((("type" . "strong")))))
+  (should (equal (org-tickets-test--pull (org-tickets-test--adf-doc
+                  (org-tickets-test--adf-heading 1 "bold" '((("type" . "strong"))))))
                  "*** *bold*")))
 
 (ert-deftest org-tickets-test--headings-pull-with-bodies ()
   "Paragraphs between headings land in the right sections."
-  (should (equal (org-tickets-test--import
+  (should (equal (org-tickets-test--pull (org-tickets-test--adf-doc
                   (org-tickets-test--adf-para "Intro.")
                   (org-tickets-test--adf-heading 1 "A")
                   (org-tickets-test--adf-para "a")
                   (org-tickets-test--adf-heading 2 "B")
-                  (org-tickets-test--adf-para "b"))
+                  (org-tickets-test--adf-para "b")))
                  "Intro.\n\n*** A\n\na\n\n**** B\n\nb")))
 
 (ert-deftest org-tickets-test--headings-pull-paragraph-star-line-escaped ()
   "A paragraph starting with \"* \" is escaped, not made a headline."
-  (should (equal (org-tickets-test--import (org-tickets-test--adf-para "*** fake"))
+  (should (equal (org-tickets-test--pull (org-tickets-test--adf-doc (org-tickets-test--adf-para "*** fake")))
                  " *** fake")))
 
 (ert-deftest org-tickets-test--headings-pull-code-block-star-line-escaped ()
@@ -130,7 +102,7 @@
 
 (ert-deftest org-tickets-test--headings-pull-heading-text-with-newline-free-title ()
   "A heading title with leading stars still yields exactly one headline."
-  (let ((text (org-tickets-test--import (org-tickets-test--adf-heading 1 "* odd"))))
+  (let ((text (org-tickets-test--pull (org-tickets-test--adf-doc (org-tickets-test--adf-heading 1 "* odd")))))
     (with-temp-buffer
       (insert text)
       (org-mode)
@@ -181,11 +153,11 @@ whole and do not create extra tickets."
 
 (defun org-tickets-test--assert-imported-headings (type title)
   "Assert an imported ticket of TYPE titled TITLE keeps its headings."
-  (let* ((desc (org-tickets-test--import
+  (let* ((desc (org-tickets-test--pull (org-tickets-test--adf-doc
                 (org-tickets-test--adf-para "Intro.")
                 (org-tickets-test--adf-heading 1 "Top")
                 (org-tickets-test--adf-para "Body.")
-                (org-tickets-test--adf-heading 2 "Sub")))
+                (org-tickets-test--adf-heading 2 "Sub"))))
          (text (org-tickets-test--imported-buffer
                 (list (org-tickets-test--ticket-record type title desc)))))
     (should (equal (org-tickets-test--parse-tickets text) (list (cons title desc))))
@@ -213,12 +185,12 @@ whole and do not create extra tickets."
   (dolist (type '("Feature" "New Feature" "Improvement"))
     (let ((text (org-tickets-test--imported-buffer
                  (list (org-tickets-test--ticket-record
-                        type "P" (org-tickets-test--import
-                                  (org-tickets-test--adf-heading 1 "P-H"))
+                        type "P" (org-tickets-test--pull (org-tickets-test--adf-doc
+                                  (org-tickets-test--adf-heading 1 "P-H")))
                         "P-1")
                        (org-tickets-test--ticket-record
-                        "Story" "S" (org-tickets-test--import
-                                     (org-tickets-test--adf-heading 1 "S-H"))
+                        "Story" "S" (org-tickets-test--pull (org-tickets-test--adf-doc
+                                     (org-tickets-test--adf-heading 1 "S-H")))
                         "P-2")))))
       (should (equal (org-tickets-test--parse-tickets text)
                      '(("P" . "*** P-H") ("S" . "*** S-H")))))))
@@ -297,14 +269,16 @@ whole and do not create extra tickets."
 A following Story must keep its own description.
 The ADF pushed from the original and from the pulled buffer must match,
 and the pulled description must parse back unchanged."
-  (let* ((adf (org-tickets-test--normalized-adf org-desc))
+  (let* ((adf (org-tickets-test--json
+                (json-encode (org-tickets--build-adf-description org-desc))))
          (pulled-desc (org-tickets--parse-adf-description adf))
          (text (concat (org-tickets-test--ticket-text stars type "T" "old\n" "P-1")
                        (org-tickets-test--ticket-text "**" "Story" "C" "c\n" "P-2")))
          (pulled (org-tickets-test--pull-into text "P-1" type pulled-desc))
          (reparsed (org-tickets-test--description-of pulled "T")))
     (should (equal reparsed pulled-desc))
-    (should (equal (org-tickets-test--normalized-adf reparsed) adf))
+    (should (equal (org-tickets-test--json
+                           (json-encode (org-tickets--build-adf-description reparsed))) adf))
     (should (equal (org-tickets-test--description-of pulled "C") "c"))))
 
 (defconst org-tickets-test--rich-heading-description

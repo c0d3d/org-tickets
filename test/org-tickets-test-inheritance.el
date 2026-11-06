@@ -35,18 +35,6 @@
 
 ;;;; Helpers
 
-(defun org-tickets-test--due-date-of (key)
-  "Return the DUE_DATE property of the heading whose JIRA_KEY is KEY."
-  (save-excursion
-    (goto-char (org-tickets--find-ticket-by-key key))
-    (org-entry-get (point) "DUE_DATE")))
-
-(defun org-tickets-test--fix-version-of (key)
-  "Return the FIX_VERSION property of the heading whose JIRA_KEY is KEY."
-  (save-excursion
-    (goto-char (org-tickets--find-ticket-by-key key))
-    (org-entry-get (point) "FIX_VERSION")))
-
 (defun org-tickets-test--payload-due-date (data)
   "Return the duedate field of a request DATA payload, or nil."
   (cdr (assq 'duedate (cdr (assq 'fields data)))))
@@ -73,7 +61,7 @@
             ":DUE_DATE: 2026-08-01\n:END:\n"
             "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01"))))
 
 (ert-deftest org-tickets-test--due-date-inheritance-keeps-existing-date ()
   "A child that already has its own due date keeps it."
@@ -84,7 +72,7 @@
             "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
             ":DUE_DATE: 2026-07-15\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-2") "2026-07-15"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-07-15"))))
 
 (ert-deftest org-tickets-test--due-date-inherited-via-parent-property ()
   "A story whose parent is not an outline ancestor inherits via PARENT."
@@ -95,7 +83,7 @@
             "* Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
             ":PARENT: P-1\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01"))))
 
 (ert-deftest org-tickets-test--due-date-inherited-via-parent-property-when-nested ()
   "PARENT is honoured on a story nested under a non-ticket heading."
@@ -107,7 +95,7 @@
             "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
             ":PARENT: P-1\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01"))))
 
 (ert-deftest org-tickets-test--due-date-inherited-from-parent-not-in-buffer ()
   "A PARENT ticket absent from the buffer supplies its due date from Jira."
@@ -124,8 +112,8 @@
                 "* Story B\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-3\n"
                 ":PARENT: P-1\n:END:\n")
         (org-tickets--inherit-parent-properties-in-buffer)
-        (should (equal (org-tickets-test--due-date-of "P-2") "2026-09-30"))
-        (should (equal (org-tickets-test--due-date-of "P-3") "2026-09-30"))))
+        (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-09-30"))
+        (should (equal (org-tickets-test--prop-of "P-3" "DUE_DATE") "2026-09-30"))))
     (should (equal fetched '("P-1")))))
 
 (ert-deftest org-tickets-test--fix-version-inherited-from-parent-not-in-buffer ()
@@ -140,7 +128,7 @@
       (insert "* Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
               ":PARENT: P-1\n:END:\n")
       (org-tickets--inherit-parent-properties-in-buffer)
-      (should (equal (org-tickets-test--fix-version-of "P-2") "25.3")))))
+      (should (equal (org-tickets-test--prop-of "P-2" "FIX_VERSION") "25.3")))))
 
 (ert-deftest org-tickets-test--due-date-inheritance-survives-parent-fetch-error ()
   "A failed fetch of an out-of-buffer parent leaves the child unset."
@@ -151,7 +139,7 @@
       (insert "* Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
               ":PARENT: P-1\n:END:\n")
       (org-tickets--inherit-parent-properties-in-buffer)
-      (should-not (org-tickets-test--due-date-of "P-2")))))
+      (should-not (org-tickets-test--prop-of "P-2" "DUE_DATE")))))
 
 (ert-deftest org-tickets-test--due-date-inheritance-without-parent-date-is-noop ()
   "Nothing is written when no ancestor has a due date."
@@ -160,7 +148,7 @@
     (insert "* Feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n:END:\n"
             "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should-not (org-tickets-test--due-date-of "P-2"))))
+    (should-not (org-tickets-test--prop-of "P-2" "DUE_DATE"))))
 
 (ert-deftest org-tickets-test--due-date-inheritance-ignores-non-ticket-headings ()
   "A plain org heading with a DUE_DATE is not a source of inheritance."
@@ -169,7 +157,7 @@
     (insert "* Notes\n:PROPERTIES:\n:DUE_DATE: 2026-01-01\n:END:\n"
             "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should-not (org-tickets-test--due-date-of "P-2"))))
+    (should-not (org-tickets-test--prop-of "P-2" "DUE_DATE"))))
 
 ;;;; The inherited date reaches Jira on the same sync
 
@@ -193,7 +181,7 @@ Jira kept an empty due date until the next sync."
         (org-tickets-test--insert-story "New Story" nil nil)
         (org-tickets-test--run-sync)
         ;; ...and org records it too.
-        (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))))
+        (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01"))))
     (should (= 1 (length post-payloads)))
     (should (equal (org-tickets-test--payload-due-date (car post-payloads))
                    "2026-08-01"))))
@@ -236,7 +224,7 @@ Jira kept an empty due date until the next sync."
       (goto-char (point-max))
       (org-tickets-test--insert-story "Story" "P-2" nil)
       (org-tickets-test--run-sync)
-      (should (equal (org-tickets-test--due-date-of "P-2") "2026-07-15")))))
+      (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-07-15")))))
 
 ;;;; Phase 3 inheritance for tickets created during the run
 
@@ -254,7 +242,7 @@ from Jira in phase 1 (its ticket struct still has no key)."
       ;; Simulate phase 2 having written the freshly created key.
       (org-tickets--set-org-ticket-key story "P-2")
       (org-tickets--apply-due-date-inheritance doc)
-      (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01")))))
+      (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01")))))
 
 ;;;; Fix version
 
@@ -266,7 +254,7 @@ from Jira in phase 1 (its ticket struct still has no key)."
             ":FIX_VERSION: Aug2026\n:END:\n"
             "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--fix-version-of "P-2") "Aug2026"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "FIX_VERSION") "Aug2026"))))
 
 (ert-deftest org-tickets-test--fix-version-inheritance-keeps-existing ()
   "A child that already has a FIX_VERSION keeps it."
@@ -277,7 +265,7 @@ from Jira in phase 1 (its ticket struct still has no key)."
             "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
             ":FIX_VERSION: Nov2026\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--fix-version-of "P-2") "Nov2026"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "FIX_VERSION") "Nov2026"))))
 
 (ert-deftest org-tickets-test--new-story-sends-inherited-fix-version ()
   "A story created this sync is POSTed with the fix version it inherits.
@@ -298,7 +286,7 @@ in Jira -- while `org-tickets-insert-story-template' documented otherwise."
         (org-entry-put (point) "FIX_VERSION" "Aug2026")
         (org-tickets-test--insert-child "New Story" "Story")
         (org-tickets-test--run-sync)
-        (should (equal (org-tickets-test--fix-version-of "P-2") "Aug2026"))))
+        (should (equal (org-tickets-test--prop-of "P-2" "FIX_VERSION") "Aug2026"))))
     (should (= 1 (length post-payloads)))
     (should (equal (org-tickets-test--payload-fix-version (car post-payloads))
                    "Aug2026"))))
@@ -313,8 +301,8 @@ in Jira -- while `org-tickets-insert-story-template' documented otherwise."
             ":DUE_DATE: 2026-08-01\n:FIX_VERSION: Aug2026\n:END:\n"
             "** Task\n:PROPERTIES:\n:JIRA_TYPE: Task\n:JIRA_KEY: P-2\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))
-    (should (equal (org-tickets-test--fix-version-of "P-2") "Aug2026"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01"))
+    (should (equal (org-tickets-test--prop-of "P-2" "FIX_VERSION") "Aug2026"))))
 
 (ert-deftest org-tickets-test--task-is-parsed-as-a-child-ticket ()
   "A Task lands in the document's child tickets, not just its ticket list."
@@ -407,8 +395,8 @@ created in Jira, yet the sync reported success."
             ":DUE_DATE: 2026-08-01\n:FIX_VERSION: Aug2026\n:END:\n"
             "** Merge\n:PROPERTIES:\n:JIRA_TYPE: Merge\n:JIRA_KEY: P-2\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))
-    (should (equal (org-tickets-test--fix-version-of "P-2") "Aug2026"))))
+    (should (equal (org-tickets-test--prop-of "P-2" "DUE_DATE") "2026-08-01"))
+    (should (equal (org-tickets-test--prop-of "P-2" "FIX_VERSION") "Aug2026"))))
 
 (ert-deftest org-tickets-test--unknown-custom-type-is-a-child-ticket ()
   "Any type that is not a parent type counts as a child.
@@ -444,8 +432,8 @@ parent link; a type org-tickets has never heard of must not repeat it."
             "* Feature B\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-2\n"
             ":DUE_DATE: 2026-09-01\n:FIX_VERSION: B-1\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-3") "2026-09-01"))
-    (should (equal (org-tickets-test--fix-version-of "P-3") "B-1"))))
+    (should (equal (org-tickets-test--prop-of "P-3" "DUE_DATE") "2026-09-01"))
+    (should (equal (org-tickets-test--prop-of "P-3" "FIX_VERSION") "B-1"))))
 
 (ert-deftest org-tickets-test--outline-ancestor-used-when-parent-lacks-value ()
   "When the PARENT ticket has no value, the outline ancestor still supplies one."
@@ -457,7 +445,7 @@ parent link; a type org-tickets has never heard of must not repeat it."
             ":PARENT: P-2\n:END:\n"
             "* Feature B\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-2\n:END:\n")
     (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-3") "2026-08-01"))))
+    (should (equal (org-tickets-test--prop-of "P-3" "DUE_DATE") "2026-08-01"))))
 
 ;;;; org-tickets-create-story
 
