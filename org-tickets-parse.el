@@ -31,14 +31,15 @@
 (defmacro org-tickets--with-ticket-at-key (key &rest body)
   "Move point to the heading whose JIRA_KEY is KEY and evaluate BODY there.
 BODY runs with point on the matching heading; when no ticket matches the
-form evaluates to nil and BODY is skipped.  Point is moved without
-`save-excursion' — wrap the call yourself if you must preserve it."
+form evaluates to nil and BODY is skipped.  Point is restored afterwards
+\(`save-excursion')."
   (declare (indent 1) (debug (form body)))
   (let ((pos (make-symbol "pos")))
     `(let ((,pos (org-tickets--find-ticket-by-key ,key)))
        (when ,pos
-         (goto-char ,pos)
-         ,@body))))
+         (save-excursion
+           (goto-char ,pos)
+           ,@body)))))
 
 (defun org-tickets--ticket-heading-p ()
   "Non-nil when the heading at point is a ticket (has JIRA_TYPE or JIRA_KEY)."
@@ -216,12 +217,11 @@ child headings are included.  Returns nil if it is empty."
 (defun org-tickets--ensure-blocks-entry (blocker-key key)
   "Add KEY to the BLOCKS property of ticket BLOCKER-KEY unless already listed.
 Keys are compared exactly, not as substrings.  Point is preserved."
-  (save-excursion
-    (org-tickets--with-ticket-at-key blocker-key
-      (let ((current (split-string (or (org-entry-get (point) "BLOCKS") "")
-                                   "," t "[ \t]+")))
-        (unless (member key current)
-          (org-tickets--append-csv-property "BLOCKS" key))))))
+  (org-tickets--with-ticket-at-key blocker-key
+    (let ((current (split-string (or (org-entry-get (point) "BLOCKS") "")
+                                 "," t "[ \t]+")))
+      (unless (member key current)
+        (org-tickets--append-csv-property "BLOCKS" key)))))
 
 (defun org-tickets--resolve-blocked-by-in-org (doc)
   "Update org buffer BLOCKS properties from BLOCKED-BY relationships in DOC.

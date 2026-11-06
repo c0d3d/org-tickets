@@ -1,6 +1,7 @@
 ;;; org-tickets-test-cmd.el --- Tests for org-tickets commands  -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'org-tickets)
 (require 'org-tickets-cmd)
 (require 'org-tickets-test-fixtures)
 
@@ -164,3 +165,91 @@ buffer's \"New\" heading properties via `org-entry-get' on the new heading."
 
 (provide 'org-tickets-test-cmd)
 ;;; org-tickets-test-cmd.el ends here
+
+;;;; Point preservation
+
+(defconst org-tickets-test--two-tickets
+  (concat "* First\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-1\n:END:\n"
+          "* Second\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-2\n:END:\nbody text\n")
+  "Two ticket headings; the second has a body line.")
+
+(defmacro org-tickets-test--keeps-point (&rest body)
+  "Run BODY in a two-ticket org buffer with point in the second body.
+Network functions are stubbed.  Fail when BODY moves point."
+  (declare (indent 0))
+  `(with-temp-buffer
+     (org-mode)
+     (insert org-tickets-test--two-tickets)
+     (goto-char (point-max))
+     (forward-line -1)
+     (forward-char 3)
+     (let ((before (copy-marker (point))))
+       (org-tickets-test--with-stubs
+           ((org-tickets--api-request (lambda (&rest _) nil))
+            (org-tickets--resolve-config (lambda (&rest _) nil))
+            (org-tickets--async-request (lambda (&rest _) nil))
+            (org-tickets--async-create-link
+             (lambda (_from _to _type cb) (funcall cb nil nil))))
+         ,@body)
+       (should (= (marker-position before) (point))))))
+
+(ert-deftest org-tickets-test--block-link-keeps-point ()
+  (org-tickets-test--keeps-point
+    (org-tickets-add-block-link "PROJ-1" "PROJ-2")
+    (should (equal "PROJ-2" (org-entry-get (org-tickets--find-ticket-by-key "PROJ-1")
+                                           "BLOCKS")))))
+
+(ert-deftest org-tickets-test--set-fix-version-keeps-point ()
+  (org-tickets-test--keeps-point
+    (org-tickets-set-fix-version "PROJ-1" "Aug2026")
+    (should (equal "Aug2026" (org-entry-get (org-tickets--find-ticket-by-key "PROJ-1")
+                                            "FIX_VERSION")))))
+
+(ert-deftest org-tickets-test--update-story-sizing-keeps-point ()
+  (org-tickets-test--keeps-point
+    (org-tickets-update-story-sizing "PROJ-1" 3)
+    (should (equal "3" (org-entry-get (org-tickets--find-ticket-by-key "PROJ-1")
+                                      "STORY_POINTS")))))
+
+(ert-deftest org-tickets-test--with-ticket-at-key-narrowed ()
+  (with-temp-buffer
+    (org-mode)
+    (insert org-tickets-test--two-tickets)
+    (goto-char (point-min))
+    (re-search-forward "^\\* Second")
+    (beginning-of-line)
+    (narrow-to-region (point) (point-max))
+    (goto-char (+ (point) 3))
+    (let ((pt (point)) (beg (point-min)) (end (point-max)))
+      (should-not (org-tickets--with-ticket-at-key "PROJ-1" t))
+      (should (org-tickets--with-ticket-at-key "PROJ-2" t))
+      (should (= pt (point)))
+      (should (= beg (point-min)))
+      (should (= end (point-max))))))
+
+(ert-deftest org-tickets-test--load-issue-types-keeps-point-and-skips-src ()
+  (let ((org-tickets--issue-type-ids nil))
+    (with-temp-buffer
+      (org-mode)
+      (insert "#+BEGIN_SRC org\n#+JIRA_ISSUE_TYPES: Story=1\n#+END_SRC\n* H\ntext\n")
+      (goto-char (point-max))
+      (let ((pt (point)))
+        (should-not (org-tickets--load-issue-types-from-document))
+        (should (= pt (point)))))
+    (with-temp-buffer
+      (org-mode)
+      (insert "#+JIRA_ISSUE_TYPES: Story=1, Bug=2\n* H\ntext\n")
+      (goto-char (point-max))
+      (let ((pt (point)))
+        (should (equal '(("Story" . "1") ("Bug" . "2"))
+                       (org-tickets--load-issue-types-from-document)))
+        (should (= pt (point)))))))
+
+(ert-deftest org-tickets-test--refresh-issue-types-requires-org-buffer ()
+  (with-temp-buffer
+    (fundamental-mode)
+    (org-tickets-test--with-stubs
+        ((org-tickets--resolve-config (lambda (&rest _) nil))
+         (org-tickets--fetch-issue-types (lambda (&rest _) nil)))
+      (should-error (org-tickets-refresh-issue-types) :type 'user-error))
+    (should (equal "" (buffer-string)))))

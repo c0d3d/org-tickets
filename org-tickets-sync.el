@@ -282,14 +282,12 @@ STORY-KEY is the Story ticket key.
 FEATURE-KEY is the parent Feature/Improvement key.
 Only sets the due date if the Story doesn't already have one.  A
 FEATURE-KEY absent from the buffer is looked up in Jira."
-  (let ((story-pos (org-tickets--find-ticket-by-key story-key)))
-    (when story-pos
-      (goto-char story-pos)
-      (unless (org-tickets--heading-property "DUE_DATE")
-        (let ((parent-due-date (org-tickets--parent-key-property
-                                feature-key "DUE_DATE")))
-          (when parent-due-date
-            (org-entry-put (point) "DUE_DATE" parent-due-date)))))))
+  (org-tickets--with-ticket-at-key story-key
+    (unless (org-tickets--heading-property "DUE_DATE")
+      (let ((parent-due-date (org-tickets--parent-key-property
+                              feature-key "DUE_DATE")))
+        (when parent-due-date
+          (org-entry-put (point) "DUE_DATE" parent-due-date))))))
 
 ;;;###autoload
 (defun org-tickets-update-story-sizing (story-key story-points)

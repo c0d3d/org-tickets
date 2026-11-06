@@ -215,22 +215,21 @@ This is a simple implementation that returns the first agile board."
         (org-tickets--fetch-issue-types))))
 
 (defun org-tickets--load-issue-types-from-document ()
-  "Load issue type IDs from org document properties."
-  (goto-char (point-min))
-  (when (re-search-forward "^#\\+JIRA_ISSUE_TYPES:[ \t]*\\(.*\\)" nil t)
-    (let ((raw (match-string-no-properties 1)))
+  "Load issue type IDs from the #+JIRA_ISSUE_TYPES keyword, leaving point alone."
+  (let ((raw (cadar (org-collect-keywords '("JIRA_ISSUE_TYPES")))))
+    (when org-tickets-debug
+      (message "org-tickets: raw issue types: %s" raw))
+    (when (and raw (not (string= raw "")))
+      (setq org-tickets--issue-type-ids
+            (mapcar (lambda (pair)
+                      (when (string-match "\\(.+\\)=\\(.+\\)" pair)
+                        (let ((name (match-string-no-properties 1 pair))
+                              (id (match-string-no-properties 2 pair)))
+                          (cons (string-trim name) (string-trim id)))))
+                    (split-string raw "," t)))
       (when org-tickets-debug
-        (message "org-tickets: raw issue types: %s" raw))
-      (when (and raw (not (string= raw "")))
-        (setq org-tickets--issue-type-ids
-              (mapcar (lambda (pair)
-                        (when (string-match "\\(.+\\)=\\(.+\\)" pair)
-                          (cons (string-trim (match-string-no-properties 1 pair))
-                                (string-trim (match-string-no-properties 2 pair)))))
-                      (split-string raw "," t)))
-        (when org-tickets-debug
-          (message "org-tickets: loaded issue types: %S" org-tickets--issue-type-ids))
-        org-tickets--issue-type-ids))))
+        (message "org-tickets: loaded issue types: %S" org-tickets--issue-type-ids))
+      org-tickets--issue-type-ids)))
 
 (defun org-tickets--save-issue-types-to-document ()
   "Write the #+JIRA_ISSUE_TYPES line into the org document.

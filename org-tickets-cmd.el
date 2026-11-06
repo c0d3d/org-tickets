@@ -46,6 +46,8 @@ Credentials are fetched from authinfo on first use, not passed here."
 (defun org-tickets-refresh-issue-types ()
   "Force refresh of issue type IDs from Jira."
   (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an Org buffer"))
   (org-tickets--resolve-config)
   (org-tickets--fetch-issue-types)
   (message "org-tickets: Issue types refreshed from Jira: %s" org-tickets--issue-type-ids))
