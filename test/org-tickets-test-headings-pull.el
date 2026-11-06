@@ -18,6 +18,7 @@
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 (require 'org-tickets-test-headings-push)
+(require 'org-tickets-test-roundtrip)
 
 ;;;; Helpers
 

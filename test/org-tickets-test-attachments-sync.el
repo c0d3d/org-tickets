@@ -155,11 +155,10 @@ Description here.
 Regression test: previously used (org-entry-get (point) \"ID\" 'inherit)
 which caused child tickets to share the parent's attachment directory,
 resulting in parent attachments being uploaded to child Jira tickets."
-  (let ((test-file (make-temp-file "org-tickets-attach-inherit-test" nil ".org")))
-    (unwind-protect
-        (progn
-          (with-temp-file test-file
-            (insert "* Parent Feature
+  (with-temp-buffer
+    (org-mode)
+    (setq buffer-file-name (expand-file-name "inherit-test.org" temporary-file-directory))
+    (insert "* Parent Feature
 :PROPERTIES:
 :JIRA_TYPE: New Feature
 :JIRA_KEY: PROJ-100
@@ -170,19 +169,13 @@ resulting in parent attachments being uploaded to child Jira tickets."
 :JIRA_TYPE: Story
 :JIRA_KEY: PROJ-200
 :END:
-"))
-          (find-file test-file)
-          (org-mode)
-          ;; Navigate to child story
-          (goto-char (point-min))
-          (re-search-forward "PROJ-200" nil t)
-          ;; ensure-org-attach-id-for-current-heading should NOT return parent's ID
-          (let ((child-id (org-tickets--ensure-org-attach-id-for-current-heading)))
-            ;; The child should get its OWN new ID, not the parent's
-            (should child-id)
-            (should-not (string= child-id "parent-uuid-1234")))
-          (kill-buffer (current-buffer)))
-      (delete-file test-file))))
+")
+    (goto-char (point-min))
+    (re-search-forward "PROJ-200")
+    (let* ((org-id-track-globally nil)
+           (child-id (org-tickets--ensure-org-attach-id-for-current-heading)))
+      (should child-id)
+      (should-not (string= child-id "parent-uuid-1234")))))
 
 (ert-deftest org-tickets-test--download-attachments-cross-reference-bug ()
   "Test that async download finds correct heading when ticket key appears in another ticket's body.

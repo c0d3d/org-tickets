@@ -72,16 +72,12 @@
 (ert-deftest org-tickets-test--resolve-sprint-id-looks-up-by-name ()
   "Test that resolve-sprint-id correctly maps a sprint name to its ID.
 The cache is built as ((name . id) ...). Lookup must search by name."
-  ;; Mock the sprint cache directly — simulates what get-sprints-for-project returns
-  (setq org-tickets--sprint-cache
-        (list (cons "Test Sprint" "3453")
-              (cons "Next Sprint" "3454")))
-  (unwind-protect
-      (progn
-        (should (string= (org-tickets--resolve-sprint-id "Test Sprint") "3453"))
-        (should (string= (org-tickets--resolve-sprint-id "Next Sprint") "3454"))
-        (should (null (org-tickets--resolve-sprint-id "Nonexistent Sprint"))))
-    (setq org-tickets--sprint-cache nil)))
+  (let ((org-tickets--sprint-cache
+         (list (cons "Test Sprint" "3453")
+               (cons "Next Sprint" "3454"))))
+    (should (string= (org-tickets--resolve-sprint-id "Test Sprint") "3453"))
+    (should (string= (org-tickets--resolve-sprint-id "Next Sprint") "3454"))
+    (should (null (org-tickets--resolve-sprint-id "Nonexistent Sprint")))))
 
 (ert-deftest org-tickets-test--api-request-encodes-unicode ()
   "Test that unicode characters are correctly encoded in API requests.

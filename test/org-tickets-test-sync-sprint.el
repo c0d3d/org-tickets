@@ -75,10 +75,10 @@ Mocks resolve-sprint-id to return a known ID for the sprint name."
                                    (setq captured-fields (cdr (assoc 'fields data)))))
                                 (org-tickets--resolve-sprint-id
                                  (lambda (_name) 3453))
-                                (org-tickets--ensure-issue-types
-                                 (lambda () (setq org-tickets--issue-type-ids '(("Story" . "10001")))))
+                                (org-tickets--ensure-issue-types #'ignore)
                                 (org-tickets--resolve-config #'ignore))
-      (let ((org-tickets--project-id "12345"))
+      (let ((org-tickets--project-id "12345")
+            (org-tickets--issue-type-ids '(("Story" . "10001"))))
         (org-tickets--create-ticket "Story" "Test" nil nil nil nil "Sprint 1"))
       (let ((sprint-field (cdr (assoc 'customfield_10020 captured-fields))))
         (should (numberp sprint-field))
@@ -173,16 +173,9 @@ Mocks resolve-sprint-id to return a known ID for the sprint name."
 
 (ert-deftest org-tickets-test--sprint-cache-is-cleared-between-syncs ()
   "Test that the sprint cache is cleared between sync sessions."
-  ;; Verify the cache starts nil
-  (should (null org-tickets--sprint-cache))
-  ;; Simulate a cached sprint (e.g., from a previous sync session)
-  ;; Cache is a list of (name . id) pairs
-  (setq org-tickets--sprint-cache
-        (list (cons "Old Sprint" "3453")))
-  ;; Call the clear function
-  (org-tickets--clear-sprint-cache)
-  ;; Cache should be nil
-  (should (null org-tickets--sprint-cache)))
+  (let ((org-tickets--sprint-cache (list (cons "Old Sprint" "3453"))))
+    (org-tickets--clear-sprint-cache)
+    (should (null org-tickets--sprint-cache))))
 
 ;;;; Regression tests for symbol-key JSON responses
 ;; Emacs json-read-from-string with json-object-type 'alist produces symbol

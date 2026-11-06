@@ -163,8 +163,6 @@ buffer's \"New\" heading properties via `org-entry-get' on the new heading."
   (should (string-match-p "Fix Version"
                           (cadr (interactive-form 'org-tickets-insert-story-template)))))
 
-(provide 'org-tickets-test-cmd)
-;;; org-tickets-test-cmd.el ends here
 
 ;;;; Point preservation
 
@@ -253,3 +251,36 @@ Network functions are stubbed.  Fail when BODY moves point."
          (org-tickets--fetch-issue-types (lambda (&rest _) nil)))
       (should-error (org-tickets-refresh-issue-types) :type 'user-error))
     (should (equal "" (buffer-string)))))
+
+;;;; Attachment removal
+
+(defmacro org-tickets-test--with-remove-attachment-stubs (&rest body)
+  "Run BODY at a ticket heading with Jira attachment calls stubbed out.
+No Jira attachments exist and the attachment directory is absent."
+  (declare (indent 0))
+  `(with-temp-buffer
+     (org-mode)
+     (insert "* Test\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-100\n:END:\n")
+     (goto-char (point-min))
+     (org-tickets-test--with-stubs
+         ((org-tickets--get-attachments (lambda (_key) nil))
+          (org-tickets--delete-attachment (lambda (&rest _) nil))
+          (org-tickets--get-ticket-attach-dir (lambda (_create) nil)))
+       ,@body)))
+
+(ert-deftest org-tickets-test--attach-remove-no-attach-dir ()
+  "Removal errors clearly when there is no attachment directory or Jira file."
+  (org-tickets-test--with-remove-attachment-stubs
+    (let ((err (should-error (org-tickets-attach-remove "test.pdf"))))
+      (should (string-match-p "not found in attachment directory or Jira"
+                              (error-message-string err))))))
+
+(ert-deftest org-tickets-test--attach-remove-file-not-found ()
+  "Removal errors clearly when the named file exists nowhere."
+  (org-tickets-test--with-remove-attachment-stubs
+    (let ((err (should-error (org-tickets-attach-remove "nonexistent.pdf"))))
+      (should (string-match-p "nonexistent.pdf not found"
+                              (error-message-string err))))))
+
+(provide 'org-tickets-test-cmd)
+;;; org-tickets-test-cmd.el ends here

@@ -203,37 +203,6 @@ Story description.
       (re-search-forward "^\\* Test" nil t)
       (should-error (org-tickets-attach-remove "test.pdf")))))
 
-(ert-deftest org-tickets-test--attach-remove-no-attach-dir ()
-  "Test that org-tickets-attach-remove errors when there's no attachment directory."
-  (let ((content "* Test
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-100
-:END:
-"))
-    (with-temp-buffer
-      (insert content)
-      (org-mode)
-      (goto-char (point-min))
-      (re-search-forward "^\\* Test" nil t)
-      (should-error (org-tickets-attach-remove "test.pdf")))))
-
-(ert-deftest org-tickets-test--attach-remove-file-not-found ()
-  "Test that org-tickets-attach-remove errors when file doesn't exist."
-  (let ((content "* Test
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-100
-:ID:       12345678-1234-1234-1234-123456789012
-:END:
-"))
-    (with-temp-buffer
-      (insert content)
-      (org-mode)
-      (goto-char (point-min))
-      (re-search-forward "^\\* Test" nil t)
-      (should-error (org-tickets-attach-remove "nonexistent.pdf")))))
-
 (ert-deftest org-tickets-test--delete-attachment-api-format ()
   "Test that delete attachment API function uses correct endpoint format."
   (let ((ticket-key "PROJ-123")
