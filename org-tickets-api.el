@@ -181,12 +181,12 @@ Fetches only active and future sprints, handling pagination."
                                board-id start-at))
              (response (org-tickets--api-request "GET" endpoint))
              (values (org-tickets--alist-get "values" response))
-             (is-last (org-tickets--alist-get "isLast" response)))
-        (let ((last-page-p (and is-last (not (eq is-last :json-false)))))
-          (setq all-values (append all-values values))
-          (if (or last-page-p (null values))
-              (setq done t)
-            (setq start-at (+ start-at (length values)))))))
+             (is-last (org-tickets--alist-get "isLast" response))
+             (last-page-p (and is-last (not (eq is-last :json-false)))))
+        (setq all-values (append all-values values))
+        (if (or last-page-p (null values))
+            (setq done t)
+          (setq start-at (+ start-at (length values))))))
     (if include-ids
         (mapcar (lambda (sprint)
                   (cons (org-tickets--alist-get "name" sprint)
@@ -257,8 +257,11 @@ one at the top of the buffer."
                                 story-points sprint
                                 attachments due-date)
   "Create a new ticket in Jira.
-TYPE, SUMMARY, DESCRIPTION and the optional FIX-VERSION, LABELS,
-STORY-POINTS, SPRINT, ATTACHMENTS, DUE-DATE as before.
+TYPE is the Jira issue type name, SUMMARY the title and DESCRIPTION
+the org-format body.  Optional FIX-VERSION is a version name, LABELS a
+list of strings, STORY-POINTS a number, SPRINT a sprint ID or name,
+ATTACHMENTS the Jira attachment metadata used to resolve attachment:
+links, and DUE-DATE a date string.
 Payload construction is delegated to `org-tickets--ticket-fields'; an
 explicit SPRINT overrides the configured default sprint.  Parent
 relationships are modeled as \"Blocks\" links, never Jira's parent
@@ -271,14 +274,9 @@ field, so no parent argument is accepted here."
          (fields (org-tickets--ticket-fields ticket
                                           :create-p t
                                           :attachments attachments)))
-    (when (and sprint (not (string= (format "%s" sprint) "")))
-      (let ((sprint-id (org-tickets--resolve-sprint-value sprint))
-            (field (intern org-tickets-sprint-field)))
-        (when sprint-id
-          (setq fields (assq-delete-all field fields))
-          (setq fields (append fields (list (cons field sprint-id)))))))
-    (org-tickets--api-request "POST" "/rest/api/3/issue"
-                           (list (cons 'fields fields)))))
+    (org-tickets--api-request
+     "POST" "/rest/api/3/issue"
+     (list (cons 'fields (org-tickets--with-sprint-field fields sprint))))))
 
 (defun org-tickets--update-ticket (ticket-key &rest args)
   "Update an existing Jira ticket TICKET-KEY.
@@ -298,12 +296,7 @@ ARGS is a plist of optional updates: :summary, :description,
                   :due-date (plist-get args :due-date)))
          (fields (org-tickets--ticket-fields
                   ticket :attachments (plist-get args :attachments))))
-    (when (and sprint (not (string= (format "%s" sprint) "")))
-      (let ((sprint-id (org-tickets--resolve-sprint-value sprint)))
-        (when sprint-id
-          (setq fields (append fields
-                               (list (cons (intern org-tickets-sprint-field)
-                                           sprint-id)))))))
+    (setq fields (org-tickets--with-sprint-field fields sprint))
     (when fields
       (org-tickets--api-request "PUT" (concat "/rest/api/3/issue/" ticket-key)
                              (list (cons 'fields fields))))))
@@ -321,28 +314,35 @@ Goes through the rate-limit state machine via `org-tickets--async-request'."
          (cons "outwardIssue" (list (cons "key" to-key))))))
 
 (defvar org-tickets--sprint-cache nil
-  "Cache of sprints for the current project: ((ID . \"name\") ...).")
+  "Cache of sprints for the current project: ((\"name\" . ID) ...).")
 
 (defun org-tickets--clear-sprint-cache ()
   "Clear the sprint cache, forcing a re-fetch on the next sprint lookup."
   (setq org-tickets--sprint-cache nil))
 
 (defun org-tickets--resolve-sprint-value (sprint)
-  "Resolve SPRINT to a numeric ID suitable for customfield_10020.
+  "Resolve SPRINT to a numeric ID for the field `org-tickets-sprint-field'.
 SPRINT may be a number, a numeric string, or a sprint name.
-Returns the numeric ID (as a number), or nil if unresolvable."
+Returns the numeric ID (as a number), or nil if SPRINT is nil or empty
+or cannot be resolved."
   (cond
+   ((or (null sprint) (equal sprint "")) nil)
    ((numberp sprint) sprint)
-   ((and (stringp sprint) (string-match "^[0-9]+$" sprint))
-    (string-to-number sprint))
-   ((stringp sprint)
-    (let ((resolved (org-tickets--resolve-sprint-id sprint)))
-      (cond
-       ((numberp resolved) resolved)
-       ((and (stringp resolved) (string-match "^[0-9]+$" resolved))
-        (string-to-number resolved))
-       (t nil))))
-   (t nil)))
+   ((not (stringp sprint)) nil)
+   ((string-match-p "\\`[0-9]+\\'" sprint) (string-to-number sprint))
+   (t (let ((id (org-tickets--resolve-sprint-id sprint)))
+        (and (numberp id) id)))))
+
+(defun org-tickets--with-sprint-field (fields sprint)
+  "Return FIELDS with the sprint field set from SPRINT.
+SPRINT is resolved by `org-tickets--resolve-sprint-value'; any existing
+`org-tickets-sprint-field' entry is replaced.  FIELDS is returned
+unchanged when SPRINT is nil, empty or unresolvable."
+  (let ((sprint-id (org-tickets--resolve-sprint-value sprint))
+        (field (intern org-tickets-sprint-field)))
+    (if sprint-id
+        (append (assq-delete-all field fields) (list (cons field sprint-id)))
+      fields)))
 
 (defun org-tickets--resolve-sprint-id (sprint-name)
   "Resolve SPRINT-NAME to its numeric ID.
@@ -354,27 +354,10 @@ Uses cached sprints if available, otherwise fetches from Jira."
   (assoc-default sprint-name org-tickets--sprint-cache #'string=))
 
 (defun org-tickets--parse-sprint-from-jira-response (sprint-data)
-  "Parse sprint data from Jira API response.
-SPRINT-DATA may be a single object, a list of sprints, or a dotted pair.
-Returns the sprint name as a string, or nil if not available."
-  (when sprint-data
-    (let* ((is-proper-list (proper-list-p sprint-data))
-           ;; Get the first sprint from various formats
-           (first-sprint (cond
-                          ;; Proper list of sprints - take first
-                          (is-proper-list (car sprint-data))
-                          ;; Dotted pair: (first . second) - take car
-                          ((consp sprint-data) (car sprint-data))
-                          ;; Single item - use directly
-                          (t sprint-data)))
-           ;; Convert dotted pair to proper list if needed for org-tickets--alist-get
-           (first-sprint-alist (if (and first-sprint
-                                         (consp first-sprint)
-                                         (not (consp (cdr first-sprint))))
-                                    (list first-sprint)
-                                  first-sprint)))
-      ;; Extract name from the alist
-      (org-tickets--alist-get "name" first-sprint-alist))))
+  "Return the first sprint's name from SPRINT-DATA, or nil.
+SPRINT-DATA is the Jira sprint field: a list of sprint alists."
+  (when (consp sprint-data)
+    (org-tickets--alist-get "name" (car sprint-data))))
 
 (provide 'org-tickets-api)
 

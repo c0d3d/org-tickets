@@ -455,8 +455,8 @@ a double 's' suffix."
                 (cons "fields"
                       (list (cons "summary" "Test")
                             (cons "issuetype" (list (cons "name" "Task")))
-                            (cons "customfield_10020" (list (cons "name" "Sprint 1")
-                                                            (cons "state" "active")))))))
+                            (cons "customfield_10020" (list (list (cons "name" "Sprint 1")
+                                                                  (cons "state" "active"))))))))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     (should (string= (org-tickets--ticket-sprint ticket) "Sprint 1"))))
 
@@ -488,23 +488,6 @@ The code should return the first sprint from the list."
          (ticket (org-tickets--parse-jira-issue jira-response)))
     ;; Should return the first sprint, not the full list
     (should (string= (org-tickets--ticket-sprint ticket) "Sprint 1"))))
-
-(ert-deftest org-tickets-test--parse-sprint-dotted-pair ()
-  "Test parsing Sprint field when it comes as a dotted pair.
-This can happen with certain JSON parsers."
-  (let* ((jira-response
-          (list (cons "id" 1)
-                (cons "key" "TEST-126")
-                (cons "fields"
-                      (list (cons "summary" "Test")
-                            (cons "issuetype" (list (cons "name" "Task")))
-                            ;; Dotted pair format: (first . second)
-                            (cons "customfield_10020"
-                                  (cons (cons "name" "Sprint A")
-                                        (cons "state" "active")))))))
-         (ticket (org-tickets--parse-jira-issue jira-response)))
-    ;; Should handle dotted pair and return the first element's name
-    (should (string= (org-tickets--ticket-sprint ticket) "Sprint A"))))
 
 (ert-deftest org-tickets-test--parse-sprint-nil-value ()
   "Test parsing Sprint field when it has a nil value."

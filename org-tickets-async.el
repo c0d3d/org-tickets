@@ -151,11 +151,15 @@ Clears throttle flag, doubles max-concurrent, drains pending queue."
 (defun org-tickets--rate-limit-effective-max (state)
   "Return the effective concurrency cap for rate-limit STATE.
 That is the stricter of the 429-recovery cap and the defcustom."
-  (let ((recovery (org-tickets--rate-limit-state-max-concurrent state)))
-    (cond ((and recovery org-tickets-max-concurrent-requests)
-           (min recovery org-tickets-max-concurrent-requests))
-          (recovery recovery)
-          (t org-tickets-max-concurrent-requests))))
+  (let ((caps (delq nil (list (org-tickets--rate-limit-state-max-concurrent state)
+                              org-tickets-max-concurrent-requests))))
+    (and caps (apply #'min caps))))
+
+(defun org-tickets--rate-limit-enqueue (state thunk)
+  "Append THUNK to the pending queue of rate-limit STATE."
+  (setf (org-tickets--rate-limit-state-pending-queue state)
+        (append (org-tickets--rate-limit-state-pending-queue state)
+                (list thunk))))
 
 (defun org-tickets--rate-limit-at-capacity-p (state)
   "Non-nil when STATE's in-flight count has reached the effective cap."
@@ -183,17 +187,14 @@ Returns a number; defaults to 5 if header is absent or unparseable."
   "Handle a 429 described by STATUS-TEXT in the current (state) buffer.
 Queues THUNK to re-fire after the Retry-After window."
   (org-tickets--rate-limit-on-429 (org-tickets--async-parse-retry-after status-text))
-  (let ((state (org-tickets--rate-state)))
-    (setf (org-tickets--rate-limit-state-pending-queue state)
-          (append (org-tickets--rate-limit-state-pending-queue state)
-                  (list thunk)))))
+  (org-tickets--rate-limit-enqueue (org-tickets--rate-state) thunk))
 
 (defun org-tickets--async-safe-callback (callback response err)
   "Invoke CALLBACK with RESPONSE and ERR, trapping elisp errors.
 An error inside a callback would otherwise unwind into url.el's
 process machinery and silently strand the batch pipeline (stuck
 read-only buffer, progress frozen).  Errors are logged loudly
-instead; recovery is `org-tickets-sync-reset' (Track C)."
+instead; recovery is `org-tickets-sync-reset'."
   (condition-case cb-err
       (funcall callback response err)
     (error
@@ -266,10 +267,11 @@ THUNK re-fires the request after a 429."
 
 (defun org-tickets--async-request (method endpoint callback &optional data)
   "Make an async HTTP request to Jira.
-METHOD, ENDPOINT, CALLBACK, DATA as before.  CALLBACK always runs in
-the buffer current at call time.  When that buffer's rate-limit state
-is throttled, or its concurrency cap is at capacity, the request is
-queued instead of fired."
+METHOD is the HTTP method and ENDPOINT the API path.  CALLBACK is
+\(lambda (response err) ...) and always runs in the buffer current at
+call time.  Optional DATA is the request body, encoded as JSON.  When
+that buffer's rate-limit state is throttled, or its concurrency cap is
+at capacity, the request is queued instead of fired."
   (unless org-tickets--jira-base-url
     (org-tickets--resolve-config))
   (org-tickets--async-enqueue method
@@ -295,9 +297,7 @@ concurrency cap."
     (let ((state (org-tickets--rate-state)))
       (if (or (org-tickets--rate-limit-state-throttled-p state)
               (org-tickets--rate-limit-at-capacity-p state))
-          (setf (org-tickets--rate-limit-state-pending-queue state)
-                (append (org-tickets--rate-limit-state-pending-queue state)
-                        (list thunk)))
+          (org-tickets--rate-limit-enqueue state thunk)
         (funcall thunk)))))
 
 (defun org-tickets--async-batch (thunks final-callback)
