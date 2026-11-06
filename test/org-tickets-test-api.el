@@ -3,8 +3,8 @@
 ;;; Commentary:
 
 ;; Tests that requests read the configuration defcustoms and per-host
-;; credentials at request time.  `auth-source-search' is always stubbed so
-;; no test reads ~/.authinfo.
+;; credentials at request time.  `auth-source-search' is stubbed, or
+;; `auth-sources' bound to a temp file, so no test reads ~/.authinfo.
 
 ;;; Code:
 
@@ -121,6 +121,34 @@ Within one command, repeated requests look credentials up once."
                  (error-message-string
                   (should-error (org-tickets--async-request "GET" "/x" #'ignore)))))))
     (should-not requests)))
+
+(defun org-tickets-test--write-authinfo (file host token)
+  "Write FILE as an authinfo with one entry for HOST holding TOKEN.
+The mtime is set from TOKEN's length so successive writes always differ."
+  (with-temp-file file
+    (insert (format "machine %s login u password %s\n" host token)))
+  (set-file-times file (time-add (current-time) (length token))))
+
+(ert-deftest org-tickets-test--rotated-authinfo-token-used-next-command ()
+  "A token rewritten in a real authinfo file is used from the next command.
+auth-source's own result cache is left active, so this proves the
+re-read reaches the file rather than a cached search result."
+  (let* ((file (make-temp-file "org-tickets-authinfo"))
+         (host "rotate.example.invalid")
+         (auth-sources (list file))
+         (auth-source-do-cache t)
+         (org-tickets-base-url (concat "https://" host))
+         (org-tickets-project-key "PROJ")
+         (org-tickets-project-id "12345")
+         (org-tickets--credentials-cache nil))
+    (unwind-protect
+        (progn
+          (org-tickets-test--write-authinfo file host "old")
+          (should (equal (org-tickets--resolve-config) '("u" . "old")))
+          (org-tickets-test--write-authinfo file host "rotated")
+          (should (equal (org-tickets--resolve-config) '("u" . "rotated"))))
+      (auth-source-forget+ :host host)
+      (delete-file file))))
 
 ;;;; Issue types
 

@@ -100,14 +100,16 @@ drops them."
 (defun org-tickets--resolve-config ()
   "Check that the configuration is set and re-read the host's credentials.
 Run at the start of each command, so a token changed in authinfo takes
-effect on the next command.  Signals a `user-error' naming the first
+effect on the next command.  auth-source's own cache of search results
+for the host is dropped too.  Signals a `user-error' naming the first
 unset configuration variable."
   (org-tickets--base-url)
   (org-tickets--project-key)
   (org-tickets--project-id)
-  (setq org-tickets--credentials-cache
-        (assoc-delete-all (org-tickets--config-host)
-                          org-tickets--credentials-cache))
+  (let ((host (org-tickets--config-host)))
+    (auth-source-forget+ :host host)
+    (setq org-tickets--credentials-cache
+          (assoc-delete-all host org-tickets--credentials-cache)))
   (org-tickets--credentials))
 
 (defun org-tickets--async-build-headers ()
