@@ -52,21 +52,36 @@ Credentials are fetched from authinfo on first use, not passed here."
 
 ;;;; Templates
 
+(defconst org-tickets--template-keep-empty-props
+  '("LABELS" "BLOCKS" "BLOCKED-BY" "STORY_POINTS")
+  "Template properties that are written even when their value is empty.")
+
+(defun org-tickets--insert-ticket-template (stars type summary props)
+  "Insert the heading \"STARS SUMMARY\" at point and put properties on it.
+TYPE is stored as JIRA_TYPE.  PROPS is an alist of (NAME . VALUE) pairs
+stored on the new heading, in order.  Pairs whose value is nil or \"\"
+are skipped, except names in `org-tickets--template-keep-empty-props',
+which are written empty.  Point ends after the new entry's property
+drawer."
+  (let ((start (point)))
+    (insert stars " " summary "\n")
+    (goto-char start)
+    (dolist (prop (cons (cons "JIRA_TYPE" type) props))
+      (when (or (member (car prop) org-tickets--template-keep-empty-props)
+                (not (member (cdr prop) '(nil ""))))
+        (org-entry-put (point) (car prop) (or (cdr prop) ""))))
+    (org-end-of-meta-data)))
+
 ;;;###autoload
 (defun org-tickets-insert-feature-template (summary &optional fix-version due-date)
-  "Insert a Feature/Improvement template at point.
+  "Insert a Feature template at point.
 SUMMARY is the feature title.
 FIX-VERSION is optional.
 DUE-DATE is optional (YYYY-MM-DD format)."
   (interactive "sFeature summary: \nsFix Version (optional): \nsDue Date (optional, YYYY-MM-DD): ")
-  (insert "* " summary "\n")
-  (org-entry-put (point) "JIRA_TYPE" "New Feature")
-  (when (and fix-version (not (string= fix-version "")))
-    (org-entry-put (point) "FIX_VERSION" fix-version))
-  (org-entry-put (point) "LABELS" "")
-  (org-entry-put (point) "BLOCKS" "")
-  (when (and due-date (not (string= due-date "")))
-    (org-entry-put (point) "DUE_DATE" due-date)))
+  (org-tickets--insert-ticket-template
+   "*" "New Feature" summary
+   `(("FIX_VERSION" . ,fix-version) ("LABELS") ("BLOCKS") ("DUE_DATE" . ,due-date))))
 
 ;;;###autoload
 (defun org-tickets-insert-improvement-template (summary &optional fix-version due-date)
@@ -75,14 +90,9 @@ SUMMARY is the improvement title.
 FIX-VERSION is optional.
 DUE-DATE is optional (YYYY-MM-DD format)."
   (interactive "sImprovement summary: \nsFix Version (optional): \nsDue Date (optional, YYYY-MM-DD): ")
-  (insert "* " summary "\n")
-  (org-entry-put (point) "JIRA_TYPE" "Improvement")
-  (when (and fix-version (not (string= fix-version "")))
-    (org-entry-put (point) "FIX_VERSION" fix-version))
-  (org-entry-put (point) "LABELS" "")
-  (org-entry-put (point) "BLOCKS" "")
-  (when (and due-date (not (string= due-date "")))
-    (org-entry-put (point) "DUE_DATE" due-date)))
+  (org-tickets--insert-ticket-template
+   "*" "Improvement" summary
+   `(("FIX_VERSION" . ,fix-version) ("LABELS") ("BLOCKS") ("DUE_DATE" . ,due-date))))
 
 ;;;###autoload
 (defun org-tickets-insert-story-template (summary parent-key &optional fix-version)
@@ -90,16 +100,11 @@ DUE-DATE is optional (YYYY-MM-DD format)."
 SUMMARY is the story title.
 PARENT-KEY is the parent Feature/Improvement key.
 FIX-VERSION is optional (will inherit if not specified)."
-  (interactive "sStory summary: \nsParent key: ")
-  (insert "** " summary "\n")
-  (org-entry-put (point) "JIRA_TYPE" "Story")
-  (org-entry-put (point) "PARENT" parent-key)
-  (org-entry-put (point) "BLOCKS" "")
-  (org-entry-put (point) "BLOCKED-BY" "")
-  (org-entry-put (point) "STORY_POINTS" "")
-  (org-entry-put (point) "LABELS" "")
-  (when (and fix-version (not (string= fix-version "")))
-    (org-entry-put (point) "FIX_VERSION" fix-version)))
+  (interactive "sStory summary: \nsParent key: \nsFix Version (optional): ")
+  (org-tickets--insert-ticket-template
+   "**" "Story" summary
+   `(("PARENT" . ,parent-key) ("BLOCKS") ("BLOCKED-BY") ("STORY_POINTS")
+     ("LABELS") ("FIX_VERSION" . ,fix-version))))
 
 ;;;; Sync Command
 

@@ -113,5 +113,54 @@ deletion happened."
         (org-tickets-attach-open)
         (should revealed)))))
 
+(defun org-tickets-test--props-at-new-heading (call expected-type)
+  "Run CALL in a buffer with an existing heading, check props land on \"New\".
+EXPECTED-TYPE is the JIRA_TYPE the new heading must have.  Return the
+buffer's \"New\" heading properties via `org-entry-get' on the new heading."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Other\n")
+    (goto-char (point-min))
+    (funcall call)
+    (goto-char (point-min))
+    (re-search-forward "^\\* New$")
+    (should (equal (org-entry-get (point) "JIRA_TYPE") expected-type))
+    (should (equal (org-entry-get (point) "LABELS") ""))
+    (should (equal (org-entry-get (point) "BLOCKS") ""))
+    (goto-char (point-min))
+    (re-search-forward "^\\* Other$")
+    (should-not (org-entry-get (point) "JIRA_TYPE"))
+    (should-not (org-entry-get (point) "LABELS"))))
+
+(ert-deftest org-tickets-test--feature-template-at-existing-heading ()
+  (org-tickets-test--props-at-new-heading
+   (lambda () (org-tickets-insert-feature-template "New" "" ""))
+   "New Feature"))
+
+(ert-deftest org-tickets-test--improvement-template-at-existing-heading ()
+  (org-tickets-test--props-at-new-heading
+   (lambda () (org-tickets-insert-improvement-template "New" "" ""))
+   "Improvement"))
+
+(ert-deftest org-tickets-test--story-template-at-existing-heading ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Other\n")
+    (goto-char (point-min))
+    (org-tickets-insert-story-template "New" "P-1")
+    (goto-char (point-min))
+    (re-search-forward "^\\*\\* New$")
+    (should (equal (org-entry-get (point) "JIRA_TYPE") "Story"))
+    (should (equal (org-entry-get (point) "PARENT") "P-1"))
+    (should (equal (org-entry-get (point) "BLOCKS") ""))
+    (goto-char (point-min))
+    (re-search-forward "^\\* Other$")
+    (should-not (org-entry-get (point) "JIRA_TYPE"))
+    (should-not (org-entry-get (point) "PARENT"))))
+
+(ert-deftest org-tickets-test--story-template-prompts-fix-version ()
+  (should (string-match-p "Fix Version"
+                          (cadr (interactive-form 'org-tickets-insert-story-template)))))
+
 (provide 'org-tickets-test-cmd)
 ;;; org-tickets-test-cmd.el ends here
