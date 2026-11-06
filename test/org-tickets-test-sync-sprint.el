@@ -127,12 +127,12 @@ Mocks resolve-sprint-id to return a known ID for the sprint name."
         (should (member (cdar sprints) '("3453" 3453)))))))
 
 (ert-deftest org-tickets-test--extract-sprint-honors-custom-field ()
-  "`org-tickets--extract-sprint-from-response' reads the configured
+  "`org-tickets--issue-sprint' reads the configured
 `org-tickets-sprint-field', not a hardcoded customfield_10020."
   (let ((org-tickets-sprint-field "customfield_99999"))
     (let ((response (org-tickets-test--json
                      "{\"fields\": {\"customfield_99999\": [{\"name\": \"Sprint 42\", \"state\": \"active\"}]}}")))
-      (should (string= (org-tickets--extract-sprint-from-response response)
+      (should (string= (org-tickets--issue-sprint response)
                        "Sprint 42")))))
 
 (ert-deftest org-tickets-test--fix-version-sent-as-array ()
@@ -242,16 +242,5 @@ symbol-keyed alists from json-read-from-string."
         (should (= (length sprints) 2))
         (should (string= (caar sprints) "Sprint 1"))
         (should (string= (car (cadr sprints)) "Sprint 2"))))))
-
-(ert-deftest org-tickets-test--parse-sprint-from-response ()
-  "The first sprint's name is returned; empty or null data yields nil."
-  (should (equal (org-tickets--parse-sprint-from-jira-response
-                  (org-tickets-test--json
-                   "[{\"id\": 1, \"name\": \"Sprint 1\"}, {\"id\": 2, \"name\": \"Sprint 2\"}]"))
-                 "Sprint 1"))
-  (should-not (org-tickets--parse-sprint-from-jira-response
-               (org-tickets-test--json "[]")))
-  (should-not (org-tickets--parse-sprint-from-jira-response
-               (org-tickets-test--json "null"))))
 
 (provide 'org-tickets-test-sync-sprint)

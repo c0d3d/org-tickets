@@ -688,6 +688,29 @@ and | in content is escaped."
     (should (= (org-tickets--ticket-story-points ticket) 5))
     (should (equal (org-tickets--ticket-sprint ticket) "Sprint 7"))))
 
+(ert-deftest org-tickets-test--issue-accessors ()
+  "The issue accessors read due date, fix version, sprint and attachments."
+  (let ((org-tickets-sprint-field "customfield_10020")
+        (full (org-tickets-test--json
+               "{\"key\":\"P-1\",\"fields\":{
+                  \"duedate\":\"2026-08-01\",
+                  \"fixVersions\":[{\"name\":\"25.3\"},{\"name\":\"25.4\"}],
+                  \"customfield_10020\":[{\"id\":1,\"name\":\"Sprint 1\"},{\"id\":2,\"name\":\"Sprint 2\"}],
+                  \"attachment\":[{\"id\":\"9\",\"filename\":\"a.png\"}]}}"))
+        (empty (org-tickets-test--json
+                "{\"key\":\"P-2\",\"fields\":{\"fixVersions\":[],
+                  \"customfield_10020\":null,\"attachment\":[]}}")))
+    (should (equal (org-tickets--issue-due-date full) "2026-08-01"))
+    (should (equal (org-tickets--issue-fix-version full) "25.3"))
+    (should (equal (org-tickets--issue-sprint full) "Sprint 1"))
+    (should (equal (org-tickets--alist-get "filename"
+                                           (car (org-tickets--issue-attachments full)))
+                   "a.png"))
+    (should-not (org-tickets--issue-due-date empty))
+    (should-not (org-tickets--issue-fix-version empty))
+    (should-not (org-tickets--issue-sprint empty))
+    (should-not (org-tickets--issue-attachments empty))))
+
 (provide 'org-tickets-test-import)
 
 ;;; org-tickets-test-import.el ends here

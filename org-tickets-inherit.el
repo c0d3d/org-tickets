@@ -39,15 +39,11 @@
 Both are payload fields (`duedate' and `fixVersions'), so inheritance
 has to happen before the sync builds its requests.")
 
-(defun org-tickets--fields-due-date (fields)
-  "Return the duedate in Jira issue FIELDS, or nil."
-  (org-tickets--alist-get "duedate" fields))
-
 (defconst org-tickets--remote-inherited-fields
-  '(("DUE_DATE" . org-tickets--fields-due-date)
-    ("FIX_VERSION" . org-tickets--first-fix-version-name))
+  '(("DUE_DATE" . org-tickets--issue-due-date)
+    ("FIX_VERSION" . org-tickets--issue-fix-version))
   "Inherited properties read from Jira when the PARENT is not in the buffer.
-Each maps to a function of the issue's fields that returns the value.")
+Each maps to a function of the issue response that returns the value.")
 
 (defvar org-tickets--remote-parent-cache nil
   "Hash of parent key to its Jira issue, bound for one inheritance pass.")
@@ -86,9 +82,7 @@ Returns nil when the fetch fails."
 Only properties in `org-tickets--remote-inherited-fields' are looked up."
   (let ((extract (cdr (assoc property org-tickets--remote-inherited-fields))))
     (when extract
-      (let ((value (funcall extract
-                            (org-tickets--alist-get
-                             "fields" (org-tickets--remote-parent-issue parent-key)))))
+      (let ((value (funcall extract (org-tickets--remote-parent-issue parent-key))))
         (and (stringp value) (not (string-blank-p value)) value)))))
 
 (defun org-tickets--ancestor-property (property)

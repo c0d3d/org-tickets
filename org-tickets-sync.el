@@ -74,11 +74,10 @@ Jira.  Signals an error when Jira cannot return the feature either."
         (list :fix-version (org-tickets--ticket-fix-version feature)
               :due-date (org-tickets--ticket-due-date feature)
               :labels (org-tickets--ticket-labels feature))
-      (let ((fields (org-tickets--alist-get "fields"
-                                         (org-tickets--get-ticket feature-key))))
-        (list :fix-version (org-tickets--first-fix-version-name fields)
-              :due-date (org-tickets--fields-due-date fields)
-              :labels (org-tickets--alist-get "labels" fields))))))
+      (let ((issue (org-tickets--get-ticket feature-key)))
+        (list :fix-version (org-tickets--issue-fix-version issue)
+              :due-date (org-tickets--issue-due-date issue)
+              :labels (org-tickets--response-field issue "labels"))))))
 
 (defun org-tickets--insert-story-heading (summary parent-key new-key &optional sprint labels)
   "Insert a Story heading as a child of PARENT-KEY's heading.

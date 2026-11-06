@@ -66,19 +66,6 @@ returns nil) when BUFFER has been killed."
                                  (let ((inhibit-read-only t))
                                    ,@body))))
 
-(defun org-tickets--extract-attachments-from-response (response)
-  "Extract attachment list from a GET issue RESPONSE."
-  (org-tickets--response-field response "attachment"))
-
-(defun org-tickets--extract-sprint-from-response (response)
-  "Extract sprint name from a GET issue RESPONSE."
-  (org-tickets--parse-sprint-from-jira-response
-   (org-tickets--response-field response org-tickets-sprint-field)))
-
-(defun org-tickets--extract-due-date-from-response (response)
-  "Extract due date from a GET issue RESPONSE."
-  (org-tickets--response-field response "duedate"))
-
 ;;;; Sync Setup and Teardown
 
 (defun org-tickets--sync-save-point ()
@@ -154,9 +141,9 @@ ORG-BUFFER is the originating buffer for progress tracking."
              (progn
                (org-tickets--safe-with-buffer org-buffer #'org-tickets--progress-increment)
                (funcall done (list :key key :error get-err) nil))
-           (let ((attachments (org-tickets--extract-attachments-from-response get-response))
-                 (sprint (org-tickets--extract-sprint-from-response get-response))
-                 (due-date (org-tickets--extract-due-date-from-response get-response)))
+           (let ((attachments (org-tickets--issue-attachments get-response))
+                 (sprint (org-tickets--issue-sprint get-response))
+                 (due-date (org-tickets--issue-due-date get-response)))
              (org-tickets--fire-ticket-put
               ticket key attachments sprint due-date org-buffer done))))))))
 
@@ -277,7 +264,7 @@ exactly once, on every path."
      (let ((adf (and (not err)
                      (org-tickets--build-adf-description
                       description
-                      (org-tickets--extract-attachments-from-response response)))))
+                      (org-tickets--issue-attachments response)))))
        (if (null adf)
            (funcall callback)
          (org-tickets--async-request

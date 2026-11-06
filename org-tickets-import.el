@@ -40,12 +40,6 @@ headline shows only the summary text."
 
 ;;;; Import Functions
 
-(defun org-tickets--first-fix-version-name (fields)
-  "Return the name of the first fixVersion in Jira FIELDS, or nil."
-  (let ((first (car (org-tickets--ensure-list
-                     (org-tickets--alist-get "fixVersions" fields)))))
-    (org-tickets--alist-get "name" first)))
-
 (defun org-tickets--parse-issuelinks (issuelinks)
   "Parse ISSUELINKS into a cons (BLOCKS-KEYS . BLOCKED-BY-KEYS).
 Only \"Blocks\"-type links contribute: an outwardIssue key is blocked by
@@ -65,11 +59,10 @@ order, matching the historical parse."
             (push (org-tickets--alist-get "key" inward) blocked-by)))))
     (cons blocks blocked-by)))
 
-(defun org-tickets--parse-attachments (fields)
-  "Parse the attachment list from Jira FIELDS into a list of alists.
+(defun org-tickets--parse-attachments (attachments-data)
+  "Parse the raw Jira ATTACHMENTS-DATA list into a list of alists.
 Each element has keys id, filename, url, size, and media-api-file-id."
-  (let ((attachments-data (org-tickets--alist-get "attachment" fields))
-        (result nil))
+  (let ((result nil))
     (dolist (att (org-tickets--ensure-list attachments-data))
       (push (list (cons 'id (org-tickets--alist-get "id" att))
                   (cons 'filename (org-tickets--alist-get "filename" att))
@@ -117,7 +110,8 @@ JIRA-RESPONSE is the parsed JSON response from the Jira REST API."
          (issuetype (org-tickets--alist-get "issuetype" fields))
          (issuelinks (append (org-tickets--alist-get "issuelinks" fields) nil))
          (links (org-tickets--parse-issuelinks issuelinks))
-         (attachments (org-tickets--parse-attachments fields))
+         (attachments (org-tickets--parse-attachments
+                       (org-tickets--issue-attachments jira-response)))
          ;; Bound dynamically so the description ADF parse below can resolve
          ;; media nodes by attachment id/UUID.
          (org-tickets--adf-attachment-id-map
@@ -128,16 +122,15 @@ JIRA-RESPONSE is the parsed JSON response from the Jira REST API."
      :summary (org-tickets--alist-get "summary" fields)
      :description (org-tickets--parse-description-adf
                    (org-tickets--alist-get "description" fields) key)
-     :fix-version (org-tickets--first-fix-version-name fields)
+     :fix-version (org-tickets--issue-fix-version jira-response)
      :labels (append (org-tickets--alist-get "labels" fields) nil)
      :story-points (org-tickets--alist-get org-tickets-story-points-field fields)
      :blocks (car links)
      :blocked-by (cdr links)
      :parent (org-tickets--alist-get "key" (org-tickets--alist-get "parent" fields))
      :attachments attachments
-     :sprint (org-tickets--parse-sprint-from-jira-response
-              (org-tickets--alist-get org-tickets-sprint-field fields))
-     :due-date (org-tickets--alist-get "duedate" fields))))
+     :sprint (org-tickets--issue-sprint jira-response)
+     :due-date (org-tickets--issue-due-date jira-response))))
 
 (defun org-tickets--put-property-unless-nil (name value)
   "Set property NAME at point to VALUE, skipping it when VALUE is nil."

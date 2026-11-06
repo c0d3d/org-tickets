@@ -27,6 +27,7 @@
 
 (require 'org-tickets-core)
 (require 'org-tickets-fields)
+(require 'org-tickets-adf-import)
 
 ;;;; Jira API Client
 
@@ -51,6 +52,29 @@ Binds `json-null' so fields holding :json-null encode as JSON null."
   "Return the KEY field from a Jira issue RESPONSE's \"fields\" object.
 Returns nil when RESPONSE lacks a fields object or that field."
   (org-tickets--alist-get key (org-tickets--alist-get "fields" response)))
+
+;;;; Issue accessors
+
+(defun org-tickets--issue-due-date (response)
+  "Return the due date of the Jira issue RESPONSE, or nil."
+  (org-tickets--response-field response "duedate"))
+
+(defun org-tickets--issue-fix-version (response)
+  "Return the name of the first fix version of issue RESPONSE, or nil."
+  (let ((first (car (org-tickets--ensure-list
+                     (org-tickets--response-field response "fixVersions")))))
+    (org-tickets--alist-get "name" first)))
+
+(defun org-tickets--issue-sprint (response)
+  "Return the name of the first sprint of issue RESPONSE, or nil.
+The sprint is read from the field named by `org-tickets-sprint-field'."
+  (let ((sprints (org-tickets--response-field response org-tickets-sprint-field)))
+    (when (consp sprints)
+      (org-tickets--alist-get "name" (car sprints)))))
+
+(defun org-tickets--issue-attachments (response)
+  "Return the raw Jira attachment list of issue RESPONSE, or nil."
+  (org-tickets--response-field response "attachment"))
 
 (defun org-tickets--resolve-config ()
   "Resolve configuration from custom vars and authinfo."
@@ -338,12 +362,6 @@ Uses cached sprints if available, otherwise fetches from Jira."
       (when board-id
         (setq org-tickets--sprint-cache (org-tickets--get-sprints-for-project board-id t)))))
   (assoc-default sprint-name org-tickets--sprint-cache #'string=))
-
-(defun org-tickets--parse-sprint-from-jira-response (sprint-data)
-  "Return the first sprint's name from SPRINT-DATA, or nil.
-SPRINT-DATA is the Jira sprint field: a list of sprint alists."
-  (when (consp sprint-data)
-    (org-tickets--alist-get "name" (car sprint-data))))
 
 (provide 'org-tickets-api)
 
