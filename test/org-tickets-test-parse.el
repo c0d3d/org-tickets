@@ -17,8 +17,7 @@ Some description text."))
       (org-mode)
       (goto-char (point-min))
       (re-search-forward "^\*" nil t)
-      (let* ((node (org-element-at-point))
-             (desc (org-tickets--get-ticket-description node)))
+      (let ((desc (org-tickets--get-ticket-description)))
         (should (string= desc "Some description text."))))))
 
 (ert-deftest org-tickets-test--description-with-child-headings ()
@@ -39,8 +38,7 @@ Story description."))
       (org-mode)
       (goto-char (point-min))
       (re-search-forward "Parent Feature" nil t)
-      (let* ((node (org-element-at-point))
-             (desc (org-tickets--get-ticket-description node)))
+      (let ((desc (org-tickets--get-ticket-description)))
         (should desc)
         (should (string= desc "This is the parent description."))))))
 
@@ -62,7 +60,7 @@ More.
 Child body.")
     (org-mode)
     (goto-char (point-min))
-    (should (string= (org-tickets--get-ticket-description (org-element-at-point))
+    (should (string= (org-tickets--get-ticket-description)
                      "Intro.\n*** Details\nMore."))))
 
 (ert-deftest org-tickets-test--description-bold-not-confused-with-heading ()
@@ -82,8 +80,7 @@ more text
       (org-mode)
       (goto-char (point-min))
       (re-search-forward "My Story" nil t)
-      (let* ((node (org-element-at-point))
-             (desc (org-tickets--get-ticket-description node)))
+      (let ((desc (org-tickets--get-ticket-description)))
         (should desc)
         (should (string-match-p "\\*\\*NOTE:\\*\\*" desc))
         (should (string-match-p "more text" desc))))))
@@ -101,8 +98,7 @@ Description after properties drawer."))
       (org-mode)
       (goto-char (point-min))
       (re-search-forward "^\\* Test" nil t)
-      (let* ((node (org-element-at-point))
-             (desc (org-tickets--get-ticket-description node)))
+      (let ((desc (org-tickets--get-ticket-description)))
         (should (string= desc "Description after properties drawer."))))))
 
 ;;;; Parent ticket key finding tests
@@ -613,6 +609,25 @@ Description.
     (org-tickets--resolve-blocked-by-in-org (org-tickets--parse-document))
     (goto-char (org-tickets--find-ticket-by-key "PROJ-5"))
     (should (equal (org-entry-get (point) "BLOCKS") "PROJ-12, PROJ-1"))))
+
+(ert-deftest org-tickets-test--find-ticket-by-key-returns-heading ()
+  "The lookup lands on the ticket's heading line, not inside its drawer."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* A\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-1\n:END:\nBody.\n")
+    (goto-char (org-tickets--find-ticket-by-key "PROJ-1"))
+    (should (org-at-heading-p))
+    (should (equal (org-get-heading t t t t) "A"))))
+
+(ert-deftest org-tickets-test--find-ticket-by-key-ignores-body-mentions ()
+  "A key mentioned in another ticket's body does not match that ticket."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Other\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-2\n:END:\nSee PROJ-1\n"
+            "* Target\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-1\n:END:\n")
+    (goto-char (org-tickets--find-ticket-by-key "PROJ-1"))
+    (should (org-at-heading-p))
+    (should (equal (org-get-heading t t t t) "Target"))))
 
 (ert-deftest org-tickets-test--valid-ticket-key-forms ()
   "Project keys may contain digits and underscores but must start with a capital."

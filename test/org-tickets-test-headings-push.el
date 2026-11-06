@@ -250,6 +250,11 @@ comment blocks; the next sibling headline is still pushed."
                          #'string<)
                    '("a.png" "b.png")))))
 
+(ert-deftest org-tickets-test--attachment-links-in-src-blocks-ignored ()
+  "Attachment link syntax inside a source block is code, not a link."
+  (should (null (org-tickets--description-attachment-filenames
+                 "#+BEGIN_SRC org\n[[attachment:a.png]]\n#+END_SRC"))))
+
 (ert-deftest org-tickets-test--headings-key-mentioned-in-heading-still-finds-ticket ()
   "A ticket key written in a description headline does not confuse lookup."
   (with-temp-buffer

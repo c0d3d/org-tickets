@@ -230,13 +230,15 @@ the sync reported success."
 ;;;; Phase 2: Attachments + Links
 
 (defun org-tickets--description-attachment-filenames (description)
-  "Return filenames referenced by attachment: links in DESCRIPTION."
-  (let ((filenames nil)
-        (start 0))
-    (while (string-match "\\[\\[attachment:\\([^]]+\\)\\]" description start)
-      (push (match-string 1 description) filenames)
-      (setq start (match-end 0)))
-    (nreverse filenames)))
+  "Return filenames referenced by attachment: links in DESCRIPTION.
+DESCRIPTION is parsed as org, so link syntax inside blocks is ignored."
+  (with-temp-buffer
+    (insert description)
+    (org-mode)
+    (org-element-map (org-element-parse-buffer) 'link
+      (lambda (link)
+        (when (equal (org-element-property :type link) "attachment")
+          (org-element-property :path link))))))
 
 (defun org-tickets--unresolved-attachment-links-p (description attachments)
   "Non-nil when DESCRIPTION links an attachment ATTACHMENTS cannot embed.

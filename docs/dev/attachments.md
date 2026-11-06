@@ -101,7 +101,7 @@ phase 1 skip the extra round trip.
 
 **Always use `org-tickets--find-ticket-by-key` (from `org-tickets-parse.el`) to locate a ticket heading by key.** Never use bare `re-search-forward (regexp-quote ticket-key)` — it matches the key anywhere in the buffer, including in body text of other tickets that cross-reference it.
 
-`org-tickets--find-ticket-by-key` iterates through all buffer matches and validates each against the `JIRA_KEY` property. It returns the buffer position of the correct heading, or nil.
+`org-tickets--find-ticket-by-key` is `org-find-property` on `JIRA_KEY`: it returns the position of the matching heading (point lands on the headline, not in its drawer), or nil. It respects narrowing.
 
 Pattern:
 ```elisp

@@ -244,6 +244,14 @@ only headings with a JIRA_TYPE count."
   (or (org-tickets--explicit-parent-property property)
       (org-tickets--ancestor-property property)))
 
+(defun org-tickets--inherit-parent-property-at-point (property)
+  "Set PROPERTY on the heading at point from its parent when it is empty.
+A value the heading already carries is left alone."
+  (unless (org-tickets--heading-property property)
+    (let ((inherited (org-tickets--parent-property property)))
+      (when inherited
+        (org-entry-put (point) property inherited)))))
+
 (defun org-tickets--inherit-parent-properties-in-buffer ()
   "Fill every ticket heading's empty `org-tickets--inherited-properties'.
 Runs before the sync parses the document, so an inherited value is part
@@ -254,22 +262,11 @@ cascades: a heading that just inherited is the source for its own
 children.  A heading that already carries the property is left alone;
 its value wins over the parent's."
   (let ((org-tickets--remote-parent-cache (make-hash-table :test #'equal)))
-    (save-excursion
-      (goto-char (point-min))
-      (while (re-search-forward org-heading-regexp nil t)
-        ;; Capture the heading's end before touching properties: `org-entry-put'
-        ;; clobbers the match data and leaves point in the drawer, so the next
-        ;; search must be driven from a position we saved ourselves (same
-        ;; hazard as in `org-tickets--parse-document').
-        (let ((heading-end (match-end 0)))
-          (goto-char (match-beginning 0))
-          (when (org-entry-get (point) "JIRA_TYPE")
-            (dolist (property org-tickets--inherited-properties)
-              (unless (org-tickets--heading-property property)
-                (let ((inherited (org-tickets--parent-property property)))
-                  (when inherited
-                    (org-entry-put (point) property inherited))))))
-          (goto-char (max (point) heading-end)))))))
+    (org-map-entries
+     (lambda ()
+       (when (org-entry-get (point) "JIRA_TYPE")
+         (mapc #'org-tickets--inherit-parent-property-at-point
+               org-tickets--inherited-properties))))))
 
 (defun org-tickets--inherit-due-date (story-key feature-key)
   "Inherit due date from parent Feature/Improvement to Story if not already set.

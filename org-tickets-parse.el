@@ -112,31 +112,17 @@ Blank entries are dropped; an absent or blank property gives nil."
 
 (defun org-tickets--parse-document ()
   "Parse the current org buffer and return an org-tickets--doc struct."
-  (save-excursion
-    (goto-char (point-min))
-    (let ((tickets nil)
-          (features nil)
-          (children nil))
-      (while (re-search-forward org-heading-regexp nil t)
-        ;; Capture the heading's end before parsing: parsing may clobber the
-        ;; match data and may not move point (e.g. non-ticket headings), so we
-        ;; must advance past this heading ourselves or the next search will
-        ;; re-match it forever.
-        (let ((heading-end (match-end 0)))
-          (goto-char (match-beginning 0))
-          (let ((ticket (org-tickets--parse-ticket-at-point)))
-            (when ticket
-              (push ticket tickets)
-              (pcase (org-tickets--ticket-type ticket)
-                ((pred org-tickets--parent-type-p)
-                 (push ticket features))
-                ((pred org-tickets--child-type-p)
-                 (push ticket children)))))
-          (goto-char (max (point) heading-end))))
-      (org-tickets--doc-create
-       :tickets (nreverse tickets)
-       :features (nreverse features)
-       :children (nreverse children)))))
+  (let ((tickets (delq nil (org-map-entries #'org-tickets--parse-ticket-at-point))))
+    (org-tickets--doc-create
+     :tickets tickets
+     :features (seq-filter (lambda (ticket)
+                             (org-tickets--parent-type-p
+                              (org-tickets--ticket-type ticket)))
+                           tickets)
+     :children (seq-filter (lambda (ticket)
+                             (org-tickets--child-type-p
+                              (org-tickets--ticket-type ticket)))
+                           tickets))))
 
 (defun org-tickets--doc-non-feature-tickets (doc)
   "Return DOC's tickets that are not features, in document order.
@@ -175,7 +161,7 @@ Returns an org-tickets--ticket struct or nil if not a valid ticket."
          :key (org-entry-get (point) "JIRA_KEY")
          :type type-prop
          :summary title
-         :description (org-tickets--get-ticket-description element)
+         :description (org-tickets--get-ticket-description)
          :fix-version (org-entry-get (point) "FIX_VERSION")
          :labels labels
          :story-points (and story-points (string-to-number story-points))
@@ -203,24 +189,30 @@ are part of the description and push as ADF headings."
           (setq end (point))))
       (or end limit))))
 
-(defun org-tickets--get-ticket-description (node)
-  "Get the description content from org heading NODE.
+(defun org-tickets--description-region ()
+  "Return (BEG . END) of the description of the ticket heading at point.
+BEG is the end of the property drawer's :END: line, or the start of the
+entry's contents when it has no drawer; END is `org-tickets--description-end'.
+Nil when the heading has no contents.  Point is not moved."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((element (org-element-at-point))
+          (drawer (org-get-property-block)))
+      (when (org-element-property :contents-begin element)
+        (cons (if drawer
+                  (save-excursion (goto-char (cdr drawer)) (line-end-position))
+                (org-element-property :contents-begin element))
+              (org-tickets--description-end
+               (org-element-property :contents-end element)))))))
+
+(defun org-tickets--get-ticket-description ()
+  "Return the description of the ticket heading at point, or nil if empty.
 The description runs up to the first child ticket heading; non-ticket
-child headings are included.  Returns nil if it is empty."
-  (let ((begin (org-element-property :contents-begin node))
-        (end (org-element-property :contents-end node)))
-    (when (and begin end)
-      (goto-char begin)
-      ;; Skip past properties drawer if present
-      (when (save-excursion
-              (goto-char begin)
-              (re-search-forward org-property-start-re end t))
-        (re-search-forward org-property-end-re end t)
-        (setq begin (point)))
-      (goto-char (org-element-property :begin node))
-      (let ((content (string-trim (buffer-substring-no-properties
-                                   begin (org-tickets--description-end end)))))
-        (when (> (length content) 0) content)))))
+child headings are included."
+  (let ((region (org-tickets--description-region)))
+    (when region
+      (org-tickets--non-empty-string
+       (string-trim (buffer-substring-no-properties (car region) (cdr region)))))))
 
 (defun org-tickets--ensure-blocks-entry (blocker-key key)
   "Add KEY to the BLOCKS property of ticket BLOCKER-KEY unless already listed.
@@ -262,16 +254,8 @@ never the heading itself."
       found)))
 
 (defun org-tickets--find-ticket-by-key (ticket-key)
-  "Return the position of the heading whose JIRA_KEY is TICKET-KEY.
-Uses the JIRA_KEY property to match exactly."
-  (save-excursion
-    (goto-char (point-min))
-    (catch 'found
-      (while (re-search-forward (regexp-quote ticket-key) nil t)
-        (save-excursion
-          (goto-char (match-beginning 0))
-          (when (string= (org-entry-get (point) "JIRA_KEY") ticket-key)
-            (throw 'found (point))))))))
+  "Return the position of the heading whose JIRA_KEY is TICKET-KEY, or nil."
+  (org-find-property "JIRA_KEY" ticket-key))
 
 (provide 'org-tickets-parse)
 

@@ -205,6 +205,18 @@ and inserts as an org heading with all properties."
     (org-tickets--issue-to-org ticket)
     (message "org-tickets: Imported %s" ticket-key)))
 
+(defun org-tickets--replace-description (description)
+  "Replace the description of the ticket heading at point with DESCRIPTION.
+The region starts at the end of the :END: line, so the newline the
+deletion consumes is always restored; a nil DESCRIPTION leaves an empty
+body.  Point is preserved."
+  (let ((region (org-tickets--description-region)))
+    (when region
+      (save-excursion
+        (delete-region (car region) (cdr region))
+        (goto-char (car region))
+        (insert "\n" (if description (concat description "\n") ""))))))
+
 (defun org-tickets--update-org-heading-from-ticket (ticket)
   "Update the org heading at point with data from TICKET.
 TICKET is an org-tickets--ticket struct parsed from a Jira API response.
@@ -218,32 +230,8 @@ STORY_POINTS, BLOCKS, BLOCKED-BY, PARENT, SPRINT, and description body."
     (org-edit-headline (org-tickets--strip-type-prefix type summary))
     (org-tickets--write-ticket-properties ticket t)
 
-    ;; 3. Update description body.
-    ;; IMPORTANT: compute the region only now — org-edit-headline and the
-    ;; org-entry-put calls above changed buffer positions, so any element
-    ;; captured earlier is stale.  The description ends at the first child
-    ;; ticket heading, same rule as `org-tickets--get-ticket-description'.
-    (save-excursion
-      (org-back-to-heading t)
-      (let* ((element (org-element-at-point))
-             (content-begin (org-element-property :contents-begin element))
-             (content-end (or (org-element-property :contents-end element)
-                              content-begin)))
-        (when content-begin
-          (let ((desc-start content-begin)
-                (desc-end (org-tickets--description-end content-end)))
-            (goto-char content-begin)
-            (when (re-search-forward org-property-start-re desc-end t)
-              (re-search-forward org-property-end-re desc-end t)
-              (setq desc-start (point)))
-            (when (< desc-start desc-end)
-              (delete-region desc-start desc-end))
-            (goto-char desc-start)
-            ;; desc-start sits at the end of the :END: line; always restore
-            ;; the newline the deletion consumed.
-            (if description
-                (insert "\n" description "\n")
-              (insert "\n"))))))))
+    ;; Only now: the edits above shifted the description's positions.
+    (org-tickets--replace-description description)))
 
 (defun org-tickets--pull-remote-changes-for-current-ticket ()
   "Fetch the ticket at point from Jira and update its org heading.
