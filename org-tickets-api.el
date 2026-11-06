@@ -21,7 +21,7 @@
 ;;; Commentary:
 
 ;; Jira REST API client for org-tickets.
-;; Contains config resolution, HTTP requests, and issue type management.
+;; Contains credentials, HTTP requests, and issue type fetching.
 
 ;;; Code:
 
@@ -29,16 +29,6 @@
 (require 'org-tickets-fields)
 
 ;;;; Jira API Client
-
-(defmacro org-tickets--require-config (internal-var custom-var)
-  "Set INTERNAL-VAR from CUSTOM-VAR, signalling an error if CUSTOM-VAR is unset.
-CUSTOM-VAR names an org-tickets configuration variable the user sets in
-their init file."
-  `(progn
-     (setq ,internal-var ,custom-var)
-     (unless ,internal-var
-       (user-error "`%s' is not set; customize it or set it in your init file"
-                  ',custom-var))))
 
 (defun org-tickets--encode-request-data (data)
   "JSON-encode DATA as a UTF-8 request body, or nil when DATA is nil.
@@ -75,35 +65,47 @@ The sprint is read from the field named by `org-tickets-sprint-field'."
   "Return the raw Jira attachment list of issue RESPONSE, or nil."
   (org-tickets--ensure-list (org-tickets--response-field response "attachment")))
 
-(defun org-tickets--resolve-config ()
-  "Resolve configuration from custom vars and authinfo."
-  (org-tickets--require-config org-tickets--jira-base-url org-tickets-base-url)
-  (org-tickets--require-config org-tickets--project-key org-tickets-project-key)
-  (org-tickets--require-config org-tickets--project-id org-tickets-project-id)
+(defvar org-tickets--credentials-cache nil
+  "Alist of (HOST . (USER . TOKEN)) credentials read from auth-source.")
 
-  ;; Resolve credentials from authinfo
-  (let* ((host (url-host (url-generic-parse-url org-tickets--jira-base-url)))
-         (auth (auth-source-search :host host :user nil :require '(:secret))))
+(defun org-tickets--auth-source-credentials (host)
+  "Return (USER . TOKEN) for HOST from auth-source.
+Signals an error when auth-source has no entry for HOST."
+  (let ((auth (car (auth-source-search :host host :user nil :require '(:secret)))))
     (unless auth
       (error "No authinfo entry found for host: %s" host))
-    (setq org-tickets--api-user (plist-get (car auth) :user))
-    (let ((secret (plist-get (car auth) :secret)))
-      (setq org-tickets--api-token
+    (let ((secret (plist-get auth :secret)))
+      (cons (plist-get auth :user)
             (if (functionp secret) (funcall secret) secret)))))
+
+(defun org-tickets--credentials ()
+  "Return (USER . TOKEN) for the host of `org-tickets-base-url'.
+Each host's credentials are read from auth-source once and kept in
+`org-tickets--credentials-cache'."
+  (let ((host (url-host (url-generic-parse-url (org-tickets--base-url)))))
+    (or (cdr (assoc host org-tickets--credentials-cache))
+        (let ((credentials (org-tickets--auth-source-credentials host)))
+          (push (cons host credentials) org-tickets--credentials-cache)
+          credentials))))
+
+(defun org-tickets--resolve-config ()
+  "Check that the configuration is set and load the host's credentials.
+Signals a `user-error' naming the first unset configuration variable."
+  (org-tickets--base-url)
+  (org-tickets--project-key)
+  (org-tickets--project-id)
+  (org-tickets--credentials))
 
 (defun org-tickets--async-build-headers ()
   "Build the standard Jira API request headers alist.
-Signals an error if credentials have not been resolved."
-  (unless org-tickets--api-user
-    (error "Jira API user is not set; call `org-tickets--resolve-config' first"))
-  (unless org-tickets--api-token
-    (error "Jira API token is not set; call `org-tickets--resolve-config' first"))
-  (list (cons "Content-Type" "application/json")
-        (cons "Accept" "application/json")
-        (cons "Authorization"
-              (concat "Basic "
-                      (base64-encode-string
-                       (concat org-tickets--api-user ":" org-tickets--api-token) t)))))
+Credentials come from `org-tickets--credentials'."
+  (let ((credentials (org-tickets--credentials)))
+    (list (cons "Content-Type" "application/json")
+          (cons "Accept" "application/json")
+          (cons "Authorization"
+                (concat "Basic "
+                        (base64-encode-string
+                         (concat (car credentials) ":" (cdr credentials)) t))))))
 
 (defun org-tickets--http-split-response ()
   "Split the url.el response in the current buffer into status and body.
@@ -137,9 +139,7 @@ ENDPOINT is the API path (e.g., \"/rest/api/3/search\").
 DATA is an optional request body (JSON-encoded).
 Returns the parsed JSON body, or nil when the response has no body.
 Signals an error on non-2xx responses or connection failure."
-  (unless org-tickets--jira-base-url
-    (org-tickets--resolve-config))
-  (let* ((url (concat org-tickets--jira-base-url endpoint))
+  (let* ((url (concat (org-tickets--base-url) endpoint))
          (url-request-method method)
          (url-request-extra-headers (org-tickets--async-build-headers))
          (url-request-data (org-tickets--encode-request-data data)))
@@ -164,9 +164,10 @@ Signals an error on non-2xx responses or connection failure."
   (org-tickets--api-request "GET" (concat "/rest/api/3/issue/" ticket-key)))
 
 (defun org-tickets--fetch-issue-types ()
-  "Fetch issue types from Jira for the project and cache them in the document."
+  "Fetch the project's issue types from Jira.
+Returns an alist of (NAME . ID) strings."
   (let* ((endpoint (concat "/rest/api/3/issue/createmeta?projectKeys="
-                           org-tickets--project-key
+                           (org-tickets--project-key)
                            "&expand=projects.issuetypes.fields"))
          (response (org-tickets--api-request "GET" endpoint))
          (projects (org-tickets--alist-get "projects" response))
@@ -178,14 +179,10 @@ Signals an error on non-2xx responses or connection failure."
       (error "No projects found in response: %S" response))
     (unless issue-types
       (error "No issueTypes found in project: %S" (car projects)))
-    (setq org-tickets--issue-type-ids
-          (mapcar (lambda (it)
-                    (cons (substring-no-properties (org-tickets--alist-get "name" it))
-                          (substring-no-properties (org-tickets--alist-get "id" it))))
-                  issue-types))
-    (when org-tickets-debug
-      (message "org-tickets: fetched issue types: %S" org-tickets--issue-type-ids))
-    (org-tickets--save-issue-types-to-document)))
+    (mapcar (lambda (it)
+              (cons (substring-no-properties (org-tickets--alist-get "name" it))
+                    (substring-no-properties (org-tickets--alist-get "id" it))))
+            issue-types)))
 
 (defun org-tickets--get-sprints-for-project (board-id &optional include-ids)
   "Fetch available sprints for BOARD-ID.
@@ -221,57 +218,12 @@ Fetches only active and future sprints, handling pagination."
   "Get the default board ID for the configured project.
 This is a simple implementation that returns the first agile board."
   (org-tickets--resolve-config)
-  (let* ((endpoint (format "/rest/agile/1.0/board?projectKeyOrId=%s" org-tickets--project-key))
+  (let* ((endpoint (format "/rest/agile/1.0/board?projectKeyOrId=%s"
+                           (org-tickets--project-key)))
          (response (org-tickets--api-request "GET" endpoint))
          (values (org-tickets--alist-get "values" response)))
     (when values
       (org-tickets--alist-get "id" (car values)))))
-
-(defun org-tickets--ensure-issue-types ()
-  "Ensure issue type IDs are loaded, fetching from Jira if needed."
-  ;; Ensure config is resolved before trying to fetch
-  (org-tickets--resolve-config)
-  (unless org-tickets--issue-type-ids
-    (or (org-tickets--load-issue-types-from-document)
-        (org-tickets--fetch-issue-types))))
-
-(defun org-tickets--load-issue-types-from-document ()
-  "Load issue type IDs from the #+JIRA_ISSUE_TYPES keyword, leaving point alone."
-  (let ((raw (cadar (org-collect-keywords '("JIRA_ISSUE_TYPES")))))
-    (when org-tickets-debug
-      (message "org-tickets: raw issue types: %s" raw))
-    (when (and raw (not (string= raw "")))
-      (setq org-tickets--issue-type-ids
-            (mapcar (lambda (pair)
-                      (when (string-match "\\(.+\\)=\\(.+\\)" pair)
-                        (let ((name (match-string-no-properties 1 pair))
-                              (id (match-string-no-properties 2 pair)))
-                          (cons (string-trim name) (string-trim id)))))
-                    (split-string raw "," t)))
-      (when org-tickets-debug
-        (message "org-tickets: loaded issue types: %S" org-tickets--issue-type-ids))
-      org-tickets--issue-type-ids)))
-
-(defun org-tickets--save-issue-types-to-document ()
-  "Write the #+JIRA_ISSUE_TYPES line into the org document.
-Replaces an existing line in place (kill-ring untouched) or inserts
-one at the top of the buffer."
-  (save-excursion
-    (goto-char (point-min))
-    (if (re-search-forward "^#\\+JIRA_ISSUE_TYPES:.*$" nil t)
-        (replace-match (org-tickets--format-issue-types-property) t t)
-      (goto-char (point-min))
-      (insert (org-tickets--format-issue-types-property) "\n"))))
-
-(defun org-tickets--format-issue-types-property ()
-  "Format issue type IDs as an org property line."
-  (format "#+JIRA_ISSUE_TYPES: %s"
-          (mapconcat (lambda (pair)
-                       (format "%s=%s"
-                               (substring-no-properties (car pair))
-                               (substring-no-properties (cdr pair))))
-                     org-tickets--issue-type-ids
-                     ",")))
 
 (defun org-tickets--ticket-request-fields (ticket create-p)
   "Return the Jira `fields' alist for TICKET, a `org-tickets--ticket' record.
@@ -288,8 +240,8 @@ attachment: links, and its sprint overrides any default sprint."
 Returns the Jira response, whose `key' is the new issue key.  Payload
 construction is delegated to `org-tickets--ticket-fields'; the record's
 sprint overrides the configured default sprint.  Parent relationships
-are modeled as \"Blocks\" links, never Jira's parent field."
-  (org-tickets--ensure-issue-types)
+are modeled as \"Blocks\" links, never Jira's parent field.
+`org-tickets--issue-type-ids' must already be loaded."
   (org-tickets--api-request
    "POST" "/rest/api/3/issue"
    (list (cons 'fields (org-tickets--ticket-request-fields ticket t)))))

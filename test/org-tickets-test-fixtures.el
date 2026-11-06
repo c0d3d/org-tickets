@@ -99,9 +99,9 @@ All side-effectful helpers (attachments, links, config) are stubbed out."
                                 (lambda (_desc _atts) nil))
                                (force-mode-line-update #'ignore)
                                (run-at-time #'ignore))
-     (let ((org-tickets--jira-base-url "https://test.atlassian.net")
-           (org-tickets--project-key "PROJ")
-           (org-tickets--project-id "12345")
+     (let ((org-tickets-base-url "https://test.atlassian.net")
+           (org-tickets-project-key "PROJ")
+           (org-tickets-project-id "12345")
            (org-tickets--issue-type-ids
             (list (cons "Feature" "10000")
                   (cons "New Feature" "10000")

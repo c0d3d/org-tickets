@@ -60,7 +60,7 @@ default sprint.  Signals an error for an unknown issue type."
     (unless issue-type-id
       (error "Unknown issue type %S (known types: %S)"
              jira-type (mapcar #'car org-tickets--issue-type-ids)))
-    (push (cons 'project (list (cons "id" org-tickets--project-id))) fields)
+    (push (cons 'project (list (cons "id" (org-tickets--project-id)))) fields)
     (push (cons 'issuetype (list (cons "id" issue-type-id))) fields)
     (org-tickets--maybe-push-default-sprint fields)))
 

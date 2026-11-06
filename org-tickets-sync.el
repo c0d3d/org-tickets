@@ -35,6 +35,27 @@
 (require 'org-tickets-sync-phases)
 (require 'org-tickets-import)
 
+;;;; Issue types
+
+(defun org-tickets--fetch-and-save-issue-types ()
+  "Fetch the issue types from Jira and save them to the current document.
+Sets and returns `org-tickets--issue-type-ids'."
+  (let ((issue-types (org-tickets--fetch-issue-types)))
+    (org-tickets--save-issue-types issue-types)
+    (setq org-tickets--issue-type-ids issue-types)))
+
+(defun org-tickets--ensure-issue-types ()
+  "Ensure `org-tickets--issue-type-ids' is loaded.
+Reads the document's #+JIRA_ISSUE_TYPES keyword, or fetches the types
+from Jira and saves them to the document when the keyword is absent."
+  (org-tickets--resolve-config)
+  (unless org-tickets--issue-type-ids
+    (setq org-tickets--issue-type-ids (org-tickets--load-issue-types))
+    (unless org-tickets--issue-type-ids
+      (org-tickets--fetch-and-save-issue-types))
+    (when org-tickets-debug
+      (message "org-tickets: issue types: %S" org-tickets--issue-type-ids))))
+
 ;;;; Story Creation
 
 ;;;###autoload
@@ -44,6 +65,7 @@ SUMMARY is the story title.  DESCRIPTION is optional body.
 BLOCKS-LIST is story keys this story blocks.
 SPRINT is the Sprint name (defaults to `org-tickets-default-sprint')."
   (interactive "sFeature/Improvement key: \nsStory summary: \nsDescription (optional): ")
+  (org-tickets--ensure-issue-types)
   (let* ((parent (org-tickets--story-parent-values feature-key))
          (sprint (or sprint
                      org-tickets-default-sprint

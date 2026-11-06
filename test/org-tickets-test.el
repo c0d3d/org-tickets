@@ -34,6 +34,7 @@
 (require 'org-tickets-test-sync-flow-phase2)
 (require 'org-tickets-test-record)
 (require 'org-tickets-test-options)
+(require 'org-tickets-test-api)
 
 ;;;; API Sprint tests
 

@@ -157,9 +157,9 @@ is recorded on CALLS (a variable, newest first) as a plist with :url,
      (unwind-protect
          (progn
            (with-temp-file ,var (insert ,contents))
-           (let ((org-tickets--jira-base-url "https://test.atlassian.net")
-                 (org-tickets--api-user "user@test.com")
-                 (org-tickets--api-token "token123"))
+           (let ((org-tickets-base-url "https://test.atlassian.net")
+                 (org-tickets--credentials-cache
+                  '(("test.atlassian.net" "user@test.com" . "token123"))))
              ,@body))
        (delete-file ,var))))
 

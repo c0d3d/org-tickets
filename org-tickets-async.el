@@ -268,10 +268,8 @@ METHOD is the HTTP method and ENDPOINT the API path.  CALLBACK is
 call time.  Optional DATA is the request body, encoded as JSON.  When
 that buffer's rate-limit state is throttled, or its concurrency cap is
 at capacity, the request is queued instead of fired."
-  (unless org-tickets--jira-base-url
-    (org-tickets--resolve-config))
   (org-tickets--async-enqueue method
-                              (concat org-tickets--jira-base-url endpoint)
+                              (concat (org-tickets--base-url) endpoint)
                               (org-tickets--async-build-headers)
                               (org-tickets--encode-request-data data)
                               callback))

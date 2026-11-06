@@ -61,7 +61,7 @@ even for a Story that has a parent.  Parent relationships are modeled
 as \"Blocks\" issue links (child blocks parent); setting the real
 parent field requires a Premium plan and is not the intended
 relationship.  Guards against reintroducing the parent push."
-  (let* ((org-tickets--project-id "12345")
+  (let* ((org-tickets-project-id "12345")
          (org-tickets--issue-type-ids '(("Story" . "1") ("New Feature" . "2")))
          (ticket (org-tickets--ticket-create :type "Story" :summary "S" :parent "P-7"))
          (fields (org-tickets--ticket-fields ticket :create-p t)))
@@ -70,7 +70,7 @@ relationship.  Guards against reintroducing the parent push."
     (should-not (org-tickets-test--fields-get fields "parent"))))
 
 (ert-deftest org-tickets-test--ticket-fields-feature-maps-to-new-feature ()
-  (let* ((org-tickets--project-id "12345")
+  (let* ((org-tickets-project-id "12345")
          (org-tickets--issue-type-ids '(("New Feature" . "2")))
          (fields (org-tickets--ticket-fields
                   (org-tickets--ticket-create :type "Feature" :summary "F")
@@ -78,7 +78,7 @@ relationship.  Guards against reintroducing the parent push."
     (should (equal (org-tickets-test--fields-get fields "issuetype") '(("id" . "2"))))))
 
 (ert-deftest org-tickets-test--ticket-fields-unknown-type-errors-clearly ()
-  (let ((org-tickets--project-id "12345")
+  (let ((org-tickets-project-id "12345")
         (org-tickets--issue-type-ids '(("Story" . "1"))))
     (should-error (org-tickets--ticket-fields
                    (org-tickets--ticket-create :type "Epic" :summary "E")

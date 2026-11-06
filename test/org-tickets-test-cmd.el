@@ -232,7 +232,7 @@ Network functions are stubbed.  Fail when BODY moves point."
       (insert "#+BEGIN_SRC org\n#+JIRA_ISSUE_TYPES: Story=1\n#+END_SRC\n* H\ntext\n")
       (goto-char (point-max))
       (let ((pt (point)))
-        (should-not (org-tickets--load-issue-types-from-document))
+        (should-not (org-tickets--load-issue-types))
         (should (= pt (point)))))
     (with-temp-buffer
       (org-mode)
@@ -240,7 +240,7 @@ Network functions are stubbed.  Fail when BODY moves point."
       (goto-char (point-max))
       (let ((pt (point)))
         (should (equal '(("Story" . "1") ("Bug" . "2"))
-                       (org-tickets--load-issue-types-from-document)))
+                       (org-tickets--load-issue-types)))
         (should (= pt (point)))))))
 
 (ert-deftest org-tickets-test--refresh-issue-types-requires-org-buffer ()

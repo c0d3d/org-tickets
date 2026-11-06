@@ -6,19 +6,19 @@ The package is split into logical modules for maintainability.
 
 | Module | Responsibility |
 |--------|---------------|
-| `org-tickets-core.el` | Requires, defcustoms, defvars, the `org-tickets--define-record` macro, data structures (`org-tickets--ticket`, `org-tickets--doc`), alist/list utilities, Jira attachment accessors |
-| `org-tickets-api.el` | Jira REST API client, config resolution, HTTP requests, issue type management |
+| `org-tickets-core.el` | Requires, defcustoms, defvars, config accessors (`--base-url`, `--project-key`, `--project-id`: read the defcustom on every call, `user-error` when unset), the `org-tickets--define-record` macro, data structures (`org-tickets--ticket`, `org-tickets--doc`), alist/list utilities, Jira attachment accessors |
+| `org-tickets-api.el` | Jira REST API client: per-host credentials cache (`--credentials`), `--resolve-config` (validate config, warm credentials), HTTP requests, issue type fetching (returns the alist; never touches buffers) |
 | `org-tickets-async.el` | Async HTTP layer: `url-retrieve` wrapper, rate limiting, batch execution, modeline progress |
 | `org-tickets-attachments.el` | Upload/download/sync attachments (depends on API module) |
 | `org-tickets-convert.el` | Org-to-ADF conversion, ADF node constructors |
 | `org-tickets-fields.el` | Jira payload construction (`org-tickets--ticket-fields`), create/update field rules, clearing semantics |
-| `org-tickets-parse.el` | Parse org buffers into ticket structs, document and ticket extraction |
+| `org-tickets-parse.el` | Parse org buffers into ticket structs, document and ticket extraction, `#+JIRA_ISSUE_TYPES` read/write (`--load-issue-types`, `--save-issue-types`) |
 | `org-tickets-adf-import.el` | ADF-to-org conversion (inline/block/list layers) used by import |
 | `org-tickets-import.el` | Import from Jira, ADF parsing (Jira to org) |
 | `org-tickets-links.el` | "Blocks" link creation (`--async-create-link`, per-ticket link thunks), ticket-marker helpers (`--at-ticket-marker`, `--ticket-buffer-key`, `--ticket-parent-key`) |
 | `org-tickets-inherit.el` | DUE_DATE/FIX_VERSION inheritance from the PARENT or ancestor ticket, remote parent cache (`--with-parent-cache`) |
 | `org-tickets-sync-phases.el` | Async sync pipeline: setup/teardown (`--sync-cleanup`), phase 1 (create/update), phase 2 (attachments+links), phase 3 (apply results: `--set-org-*`, `--resolve-blocked-by-in-org`) |
-| `org-tickets-sync.el` | Sync entry point, story creation, block links, fix version/label/story sizing commands |
+| `org-tickets-sync.el` | Sync entry point, issue type loading (`--ensure-issue-types`: document first, else fetch and save), story creation, block links, fix version/label/story sizing commands |
 | `org-tickets-cmd.el` | Interactive commands, templates |
 
 ## Data Structures

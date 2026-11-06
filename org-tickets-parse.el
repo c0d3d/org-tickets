@@ -21,7 +21,8 @@
 ;;; Commentary:
 
 ;; Parsing functions for org-tickets.
-;; Contains document and ticket parsing.
+;; Contains document and ticket parsing, and reading/writing the
+;; #+JIRA_ISSUE_TYPES keyword.
 
 ;;; Code:
 
@@ -231,6 +232,43 @@ never the heading itself."
 (defun org-tickets--find-ticket-by-key (ticket-key)
   "Return the position of the heading whose JIRA_KEY is TICKET-KEY, or nil."
   (org-find-property "JIRA_KEY" ticket-key))
+
+;;;; Issue types keyword
+
+(defun org-tickets--load-issue-types ()
+  "Return the issue types in the #+JIRA_ISSUE_TYPES keyword, or nil.
+The keyword holds \"NAME=ID\" pairs separated by commas; the result is an
+alist of (NAME . ID) strings.  Point is left alone and keywords inside
+src blocks are ignored."
+  (let ((raw (cadar (org-collect-keywords '("JIRA_ISSUE_TYPES")))))
+    (unless (or (null raw) (string= raw ""))
+      (mapcar (lambda (pair)
+                (when (string-match "\\(.+\\)=\\(.+\\)" pair)
+                  (let ((name (match-string-no-properties 1 pair))
+                        (id (match-string-no-properties 2 pair)))
+                    (cons (string-trim name) (string-trim id)))))
+              (split-string raw "," t)))))
+
+(defun org-tickets--format-issue-types (issue-types)
+  "Format ISSUE-TYPES, an alist of (NAME . ID), as a #+JIRA_ISSUE_TYPES line."
+  (format "#+JIRA_ISSUE_TYPES: %s"
+          (mapconcat (lambda (pair)
+                       (format "%s=%s"
+                               (substring-no-properties (car pair))
+                               (substring-no-properties (cdr pair))))
+                     issue-types
+                     ",")))
+
+(defun org-tickets--save-issue-types (issue-types)
+  "Write ISSUE-TYPES, an alist of (NAME . ID), to the #+JIRA_ISSUE_TYPES line.
+Replaces an existing line in place (kill ring untouched) or inserts one
+at the top of the buffer.  Point is preserved."
+  (save-excursion
+    (goto-char (point-min))
+    (if (re-search-forward "^#\\+JIRA_ISSUE_TYPES:.*$" nil t)
+        (replace-match (org-tickets--format-issue-types issue-types) t t)
+      (goto-char (point-min))
+      (insert (org-tickets--format-issue-types issue-types) "\n"))))
 
 (provide 'org-tickets-parse)
 

@@ -472,7 +472,7 @@ Every request answers with the new issue key P-9."
            (push (list method endpoint data) ,requests)
            (list (cons 'key "P-9")))))
      (let ((org-tickets-default-sprint nil)
-           (org-tickets--project-id "12345")
+           (org-tickets-project-id "12345")
            (org-tickets--issue-type-ids '(("Story" . "10001"))))
        ,@body)))
 

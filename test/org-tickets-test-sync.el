@@ -661,7 +661,7 @@ records exactly what create sent (not always NeedsSizing)."
 
 (ert-deftest org-tickets-test--create-ticket-payload ()
   "Creating a ticket record POSTs every field it carries."
-  (let* ((org-tickets--project-id "12345")
+  (let* ((org-tickets-project-id "12345")
          (org-tickets--issue-type-ids '(("Story" . "1") ("New Feature" . "2")))
          (org-tickets-default-sprint nil)
          (sent nil))

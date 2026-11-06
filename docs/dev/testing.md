@@ -42,6 +42,7 @@ Test files mirror source modules:
 | `org-tickets-attachments.el` | `org-tickets-test-attachments-upload.el`, `org-tickets-test-attachments-sync.el`, `org-tickets-test-attachments-async.el` |
 | `org-tickets-cmd.el` | `org-tickets-test-cmd.el`, `org-tickets-test-cmd-ticket-at-point.el` (commands run from inside a ticket's description headings) |
 | `org-tickets-async.el` | `org-tickets-test-async.el` |
+| `org-tickets-api.el` (config, credentials, issue types) | `org-tickets-test-api.el` |
 | `org-tickets-core.el` | `org-tickets-test-record.el` (the `org-tickets--define-record` macro) |
 
 Test files live in `test/` and are loaded by `test/org-tickets-test.el` (the test runner entry point) via `require`; each test file `provide`s its own feature.
@@ -84,6 +85,11 @@ When a test file exceeds 750 lines, split by category (e.g., `org-tickets-test-a
   and every side-effectful helper (attachments, links, config), then runs
   BODY. Its argument is a `(method endpoint callback &optional data)`
   lambda; capture `data` to assert on request payloads.
+- Configuration: let-bind the defcustoms (`org-tickets-base-url`,
+  `org-tickets-project-key`, `org-tickets-project-id`) — they are read on
+  every request. For real HTTP-layer code paths, also bind
+  `org-tickets--credentials-cache` to `'(("HOST" "user" . "token"))` (or stub
+  `auth-source-search`) so no test reads `~/.authinfo`.
 - `org-tickets-test--make-get-response` — fake `GET /issue` response, with
   optional sprint and due date.
 - `org-tickets-test--insert-feature` / `org-tickets-test--insert-story` — build

@@ -650,7 +650,7 @@ phase 2, not a create-payload parent."
     (org-mode)
     (insert "* Feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n:END:\n"
             "** New story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n")
-    (let* ((org-tickets--project-id "12345")
+    (let* ((org-tickets-project-id "12345")
            (org-tickets--issue-type-ids '(("Story" . "1") ("New Feature" . "2")))
            (doc (org-tickets--parse-document))
            (story (car (org-tickets--doc-children doc)))
@@ -671,7 +671,7 @@ story's create payload carries no Jira parent field."
     (org-mode)
     (insert "* New feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:END:\n"
             "** New story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n")
-    (let* ((org-tickets--project-id "12345")
+    (let* ((org-tickets-project-id "12345")
            (org-tickets--issue-type-ids '(("Story" . "1") ("New Feature" . "2")))
            (doc (org-tickets--parse-document))
            (created-keys '("P-10" "P-11"))

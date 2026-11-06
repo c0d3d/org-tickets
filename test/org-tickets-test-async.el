@@ -49,14 +49,14 @@ The mock calls the callback immediately in a temp buffer containing RESPONSE-TEX
 (defmacro org-tickets-test--with-async-stubs (&rest body)
   "Execute BODY with config and credential stubs in place.
 Stubs out `org-tickets--resolve-config', `org-tickets--async-build-headers',
-and sets `org-tickets--jira-base-url' so `org-tickets--async-request' can run."
+and binds `org-tickets-base-url' so `org-tickets--async-request' can run."
   (declare (indent 0))
   `(org-tickets-test--with-stubs ((org-tickets--resolve-config #'ignore)
                                (org-tickets--async-build-headers
                                 (lambda () (list (cons "Content-Type" "application/json"))))
                                (run-at-time #'ignore)
                                (force-mode-line-update #'ignore))
-     (let ((org-tickets--jira-base-url "https://test.atlassian.net"))
+     (let ((org-tickets-base-url "https://test.atlassian.net"))
        ,@body)))
 
 ;;;; Tests: org-tickets--async-request
@@ -154,7 +154,7 @@ dead response buffer."
                                        (with-temp-buffer
                                          (insert "HTTP/1.1 429 Too Many Requests\nRetry-After: 3\n\n")
                                          (funcall callback nil)))))
-          (let ((org-tickets--jira-base-url "https://test.atlassian.net"))
+          (let ((org-tickets-base-url "https://test.atlassian.net"))
             (org-tickets--async-request
              "GET" "/rest/api/3/issue/PROJ-123"
              #'ignore))))
@@ -561,8 +561,8 @@ leaves the shared entry installed on the default mode line."
 (ert-deftest org-tickets-test--api-request-kills-response-buffer-and-tolerates-percent ()
   "The sync path must kill its response buffer and never treat the URL
 as a format string (URLs with %20 crashed `message')."
-  (let ((org-tickets--jira-base-url "https://test.example")
-        (org-tickets--api-user "u") (org-tickets--api-token "t")
+  (let ((org-tickets-base-url "https://test.example")
+        (org-tickets--credentials-cache '(("test.example" "u" . "t")))
         (made-buffer nil))
     (org-tickets-test--with-stubs ((url-retrieve-synchronously
                                  (lambda (_url &rest _)
@@ -575,8 +575,8 @@ as a format string (URLs with %20 crashed `message')."
         (should-not (buffer-live-p made-buffer))))))
 
 (ert-deftest org-tickets-test--api-request-nil-buffer-is-clear-error ()
-  (let ((org-tickets--jira-base-url "https://test.example")
-        (org-tickets--api-user "u") (org-tickets--api-token "t"))
+  (let ((org-tickets-base-url "https://test.example")
+        (org-tickets--credentials-cache '(("test.example" "u" . "t"))))
     (org-tickets-test--with-stubs ((url-retrieve-synchronously
                                  (lambda (&rest _) nil)))
       (should-error (org-tickets--api-request "GET" "/x")))))
@@ -589,8 +589,8 @@ not in url.el's response buffer."
   (with-temp-buffer
     (org-tickets--rate-limit-reset)
     (let ((org-buffer (current-buffer))
-          (org-tickets--jira-base-url "https://test.example")
-          (org-tickets--api-user "u") (org-tickets--api-token "t")
+          (org-tickets-base-url "https://test.example")
+          (org-tickets--credentials-cache '(("test.example" "u" . "t")))
           (captured-cb nil) (got-buffer nil) (got-response nil))
       (org-tickets-test--with-stubs ((url-retrieve
                                    (lambda (_url cb &rest _) (setq captured-cb cb) nil)))
@@ -611,8 +611,8 @@ and the retry timer must drain that same buffer's queue."
   (with-temp-buffer
     (org-tickets--rate-limit-reset)
     (let ((org-buffer (current-buffer))
-          (org-tickets--jira-base-url "https://test.example")
-          (org-tickets--api-user "u") (org-tickets--api-token "t")
+          (org-tickets-base-url "https://test.example")
+          (org-tickets--credentials-cache '(("test.example" "u" . "t")))
           (captured-cb nil) (timer-fn nil) (fired 0))
       (org-tickets-test--with-stubs ((url-retrieve
                                    (lambda (_url cb &rest _)
@@ -653,37 +653,6 @@ and the retry timer must drain that same buffer's queue."
       (should warned)
       (should (string-match-p "boom" warned)))))
 
-;;;; Tests: Issue type fetch/save
-
-(ert-deftest org-tickets-test--save-issue-types-preserves-kill-ring ()
-  "Saving issue types must not push the old line onto the kill ring."
-  (with-temp-buffer
-    (org-mode)
-    (insert "#+JIRA_ISSUE_TYPES: Story=1\nbody\n")
-    (let ((org-tickets--issue-type-ids '(("Story" . "2")))
-          (kill-ring nil))
-      (org-tickets--save-issue-types-to-document)
-      (should (null kill-ring))
-      (should (string-match-p "^#\\+JIRA_ISSUE_TYPES: Story=2$" (buffer-string)))
-      ;; No blank line accumulation on repeated saves.
-      (org-tickets--save-issue-types-to-document)
-      (should-not (string-match-p "\n\n\n" (buffer-string))))))
-
-(ert-deftest org-tickets-test--fetch-issue-types-parses-realistic-response ()
-  (with-temp-buffer
-    (org-mode)
-    (let ((org-tickets--issue-type-ids nil)
-          (org-tickets--project-key "TEST"))
-      (org-tickets-test--with-stubs ((org-tickets--api-request
-                                   (lambda (&rest _)
-                                     (org-tickets-test--json
-                                      "{\"projects\": [{\"issuetypes\": [
-                        {\"name\": \"Story\", \"id\": \"10001\"},
-                        {\"name\": \"New Feature\", \"id\": \"10002\"}]}]}"))))
-        (org-tickets--fetch-issue-types)
-        (should (equal org-tickets--issue-type-ids
-                       '(("Story" . "10001") ("New Feature" . "10002"))))))))
-
 ;;;; Tests: Concurrency cap
 
 (ert-deftest org-tickets-test--async-respects-concurrency-cap ()
@@ -691,8 +660,8 @@ and the retry timer must drain that same buffer's queue."
   (with-temp-buffer
     (org-tickets--rate-limit-reset)
     (let ((org-tickets-max-concurrent-requests 2)
-          (org-tickets--jira-base-url "https://test.example")
-          (org-tickets--api-user "u") (org-tickets--api-token "t")
+          (org-tickets-base-url "https://test.example")
+          (org-tickets--credentials-cache '(("test.example" "u" . "t")))
           (callbacks nil))
       (org-tickets-test--with-stubs ((url-retrieve
                                    (lambda (_url cb &rest _) (push cb callbacks) nil)))

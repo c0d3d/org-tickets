@@ -53,7 +53,7 @@ Sprint names resolve to 3453 and the Story issue type is known."
         (org-tickets--resolve-sprint-id (lambda (_name) 3453))
         (org-tickets--ensure-issue-types #'ignore))
      (let ((org-tickets-default-sprint nil)
-           (org-tickets--project-id "12345")
+           (org-tickets-project-id "12345")
            (org-tickets--issue-type-ids '(("Story" . "10001"))))
        ,@body)))
 

@@ -103,9 +103,6 @@ Defaults to nil (no debug output)."
   :type '(choice (const :tag "Unset" nil) string)
   :group 'org-tickets)
 
-(defvar org-tickets--jira-base-url nil
-  "Internal: resolved base URL for API calls.")
-
 (defcustom org-tickets-project-key nil
   "Jira project key (e.g., \"PROJ\")."
   :type '(choice (const :tag "Unset" nil) string)
@@ -150,17 +147,24 @@ GET /rest/api/3/field and look for \"Sprint\"."
   :type 'string
   :group 'org-tickets)
 
-(defvar org-tickets--project-key nil
-  "Internal: resolved project key for API calls.")
+(defun org-tickets--config-value (variable)
+  "Return the value of configuration VARIABLE, a symbol.
+Signals a `user-error' naming VARIABLE when it is unset."
+  (or (symbol-value variable)
+      (user-error "`%s' is not set; customize it or set it in your init file"
+                  variable)))
 
-(defvar org-tickets--project-id nil
-  "Internal: resolved project ID for API calls.")
+(defun org-tickets--base-url ()
+  "Return `org-tickets-base-url', or signal a `user-error' when unset."
+  (org-tickets--config-value 'org-tickets-base-url))
 
-(defvar org-tickets--api-user nil
-  "Jira API user email (from authinfo).")
+(defun org-tickets--project-key ()
+  "Return `org-tickets-project-key', or signal a `user-error' when unset."
+  (org-tickets--config-value 'org-tickets-project-key))
 
-(defvar org-tickets--api-token nil
-  "Jira API token (from authinfo).")
+(defun org-tickets--project-id ()
+  "Return `org-tickets-project-id', or signal a `user-error' when unset."
+  (org-tickets--config-value 'org-tickets-project-id))
 
 (defvar org-tickets--issue-type-ids
   nil

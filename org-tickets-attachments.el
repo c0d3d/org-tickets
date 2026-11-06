@@ -152,7 +152,7 @@ Sends a genuine multipart/form-data POST with a `file' form field, as
 Jira's /attachments endpoint requires (a raw-body upload is rejected).
 CALLBACK is (lambda (response err) ...) called on completion."
   (let* ((filename (file-name-nondirectory file-path))
-         (url (concat org-tickets--jira-base-url
+         (url (concat (org-tickets--base-url)
                       "/rest/api/3/issue/" ticket-key "/attachments"))
          (boundary (org-tickets--multipart-boundary))
          (headers (append
