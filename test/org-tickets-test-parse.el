@@ -599,4 +599,24 @@ Description.
     (goto-char (point-min))
     (should (null (org-tickets--find-parent-ticket-key)))))
 
+(defun org-tickets-test--blocks-of-5-after-resolving (times)
+  "Resolve BLOCKED-BY TIMES times in a PROJ-1/PROJ-5 buffer; return PROJ-5 BLOCKS."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* A\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-1\n:BLOCKED-BY: PROJ-5\n:END:\n"
+            "* B\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: PROJ-5\n:BLOCKS: PROJ-12\n:END:\n")
+    (let ((doc (org-tickets--parse-document)))
+      (dotimes (_ times)
+        (org-tickets--resolve-blocked-by-in-org doc)))
+    (goto-char (org-tickets--find-ticket-by-key "PROJ-5"))
+    (org-entry-get (point) "BLOCKS")))
+
+(ert-deftest org-tickets-test--blocked-by-adds-key-that-is-a-prefix-of-existing ()
+  (should (equal (org-tickets-test--blocks-of-5-after-resolving 1)
+                 "PROJ-12,PROJ-1")))
+
+(ert-deftest org-tickets-test--blocked-by-is-idempotent ()
+  (should (equal (org-tickets-test--blocks-of-5-after-resolving 2)
+                 "PROJ-12,PROJ-1")))
+
 (provide (quote org-tickets-test-parse))

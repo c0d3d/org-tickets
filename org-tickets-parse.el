@@ -212,22 +212,27 @@ child headings are included.  Returns nil if it is empty."
                                    begin (org-tickets--description-end end)))))
         (when (> (length content) 0) content)))))
 
+(defun org-tickets--ensure-blocks-entry (blocker-key key)
+  "Add KEY to the BLOCKS property of ticket BLOCKER-KEY unless already listed.
+Keys are compared exactly, not as substrings.  Point is preserved."
+  (save-excursion
+    (org-tickets--with-ticket-at-key blocker-key
+      (let ((current (split-string (or (org-entry-get (point) "BLOCKS") "")
+                                   "," t "[ \t]+")))
+        (unless (member key current)
+          (org-tickets--append-csv-property "BLOCKS" key))))))
+
 (defun org-tickets--resolve-blocked-by-in-org (doc)
   "Update org buffer BLOCKS properties from BLOCKED-BY relationships in DOC.
 For each ticket with a BLOCKED-BY property, ensure the referenced ticket's
 BLOCKS property includes the current ticket's key."
   (dolist (ticket (org-tickets--doc-tickets doc))
-    (let ((key (org-tickets--ticket-key ticket))
-          (blocked-by (org-tickets--ticket-blocked-by ticket)))
-      (when (and key (> (length key) 0) blocked-by)
-        (dolist (blocker-key blocked-by)
+    (let ((key (org-tickets--ticket-key ticket)))
+      (when (and key (> (length key) 0))
+        (dolist (blocker-key (org-tickets--ticket-blocked-by ticket))
           (when (and blocker-key (> (length blocker-key) 0)
                      (not (string= blocker-key key)))
-            (save-excursion
-              (org-tickets--with-ticket-at-key blocker-key
-                (let ((current-blocks (or (org-entry-get (point) "BLOCKS") "")))
-                  (unless (string-match-p (regexp-quote key) current-blocks)
-                    (org-tickets--append-csv-property "BLOCKS" key)))))))))))
+            (org-tickets--ensure-blocks-entry blocker-key key)))))))
 
 (defun org-tickets--find-parent-ticket-key ()
   "Return the JIRA_KEY of the nearest ancestor Feature/Improvement.
