@@ -377,7 +377,7 @@ leaves the shared entry installed on the default mode line."
             (should (null (org-tickets-test--progress-render)))))
       (kill-buffer buf-a) (kill-buffer buf-b))))
 
-;;;; Tests: Buffer-local sync-in-progress
+;;;; Tests: Retry-After parsing
 
 (ert-deftest org-tickets-test--async-parse-retry-after-reads-header ()
   "Verify org-tickets--async-parse-retry-after extracts Retry-After value."

@@ -25,6 +25,7 @@
                    "That signature should be done with ECDSA using SHA-384 and a Nist P-384 key."))))
 
 (ert-deftest org-tickets-test--continuation-bullet-item ()
+  "Check: continuation bullet item."
   (should (equal (org-tickets-test--inline-summary "- a\n  b")
                  '("a" br "b"))))
 
@@ -44,6 +45,7 @@
                    '("a" br "b")))))
 
 (ert-deftest org-tickets-test--continuation-several-lines ()
+  "Check: continuation several lines."
   (should (equal (org-tickets-test--inline-summary "- a\n  b\n  c\n  d")
                  '("a" br "b" br "c" br "d"))))
 
@@ -64,6 +66,7 @@
                  '("a" br "code" " " "after"))))
 
 (ert-deftest org-tickets-test--continuation-tab-indent ()
+  "Check: continuation tab indent."
   (should (equal (org-tickets-test--inline-summary "- a\n\tb")
                  '("a" br "b"))))
 
@@ -91,6 +94,7 @@
     (cdr (assoc "content" item))))
 
 (ert-deftest org-tickets-test--list-item-content-after-nested-list-keeps-order ()
+  "Check: list item content after nested list keeps order."
   (let ((blocks (org-tickets-test--first-item-blocks
                  "- a\n  - nested\n\n  after nested\n- b")))
     (should (equal (mapcar (lambda (b) (cdr (assoc "type" b))) blocks)
@@ -99,11 +103,13 @@
                    "after nested"))))
 
 (ert-deftest org-tickets-test--list-item-second-paragraph-not-indented ()
+  "Check: list item second paragraph not indented."
   (let ((blocks (org-tickets-test--first-item-blocks "- a\n\n  second para")))
     (should (equal (org-tickets-test--block-text (cadr blocks))
                    "second para"))))
 
 (ert-deftest org-tickets-test--list-item-blocks-roundtrip-fixpoint ()
+  "Check: list item blocks roundtrip fixpoint."
   (dolist (text '("- a\n\n  second para"
                   "- a\n  - nested\n\n  after nested\n- b"))
     (should (equal (org-tickets-test--roundtrip-n text 3) text))))
@@ -123,6 +129,7 @@
 ;;;; Round trips are fixpoints
 
 (ert-deftest org-tickets-test--continuation-roundtrip-reported-item ()
+  "Check: continuation roundtrip reported item."
   (should (equal (org-tickets-test--roundtrip org-tickets-test--reported-item)
                  org-tickets-test--reported-item)))
 

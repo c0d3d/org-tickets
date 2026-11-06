@@ -233,6 +233,24 @@ after that create is answered."
           (should message-text)
           (should (string-match-p "already in progress" message-text)))))))
 
+(ert-deftest org-tickets-test--sync-in-one-buffer-does-not-block-another ()
+  "A sync mid-flight in one buffer does not stop a sync in another buffer."
+  (let ((requests nil)
+        (other (generate-new-buffer " *org-tickets-busy*")))
+    (unwind-protect
+        (org-tickets-test--with-sync-mocks
+            (org-tickets-test--fake-jira-handler :log requests)
+          (with-current-buffer other
+            (org-mode)
+            (setq org-tickets--sync-in-progress t))
+          (with-temp-buffer
+            (org-mode)
+            (org-tickets-test--insert-feature "Feature" "PROJ-1")
+            (org-tickets-test--run-sync))
+          (should (org-tickets-test--requests requests "PUT" "/rest/api/3/issue/PROJ-1"))
+          (should (buffer-local-value 'org-tickets--sync-in-progress other)))
+      (kill-buffer other))))
+
 ;;;; Tests: Cursor Preservation
 
 (ert-deftest org-tickets-test--sync-restores-point-to-original-heading ()
@@ -466,6 +484,50 @@ BLOCKS: PROJ-200 in its org properties."
       (let ((blocks (org-entry-get (point) "BLOCKS")))
         (should blocks)
         (should (string-match-p "PROJ-200" blocks))))))
+
+;;;; Writing keys back to the buffer
+
+(ert-deftest org-tickets-test--set-org-ticket-key-survives-earlier-insertions ()
+  "Markers ride along when text above the heading grows during sync."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* First\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:END:\n"
+            "* Second\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:END:\n")
+    (let* ((doc (org-tickets--parse-document))
+           (second (seq-find (lambda (tk)
+                               (string= (org-tickets--ticket-summary tk) "Second"))
+                             (org-tickets--doc-tickets doc))))
+      ;; Simulate phase-2 buffer growth above the target heading.
+      (goto-char (point-min))
+      (forward-line 1)
+      (insert ":ID: 123e4567-e89b-12d3-a456-426614174000\n")
+      (org-tickets--set-org-ticket-key second "PROJ-2")
+      (goto-char (point-min))
+      (search-forward "* Second")
+      (should (equal (org-entry-get (point) "JIRA_KEY") "PROJ-2")))))
+
+(ert-deftest org-tickets-test--set-org-ticket-key-targets-exact-heading ()
+  "Keys go to the parsed heading itself — never to another entry whose
+description merely contains the summary text, and never clobbering an
+existing JIRA_KEY (both happened with the old summary-text search)."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Some other feature\n"
+            ":PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: PROJ-9\n:END:\n"
+            "We should Fix login here.\n"
+            "* Fix login\n"
+            ":PROPERTIES:\n:JIRA_TYPE: Feature\n:END:\n")
+    (let* ((doc (org-tickets--parse-document))
+           (new-ticket (seq-find (lambda (tk) (null (org-tickets--ticket-key tk)))
+                                 (org-tickets--doc-tickets doc))))
+      (should new-ticket)
+      (org-tickets--set-org-ticket-key new-ticket "PROJ-100")
+      (goto-char (point-min))
+      (search-forward "* Some other feature")
+      (should (equal (org-entry-get (point) "JIRA_KEY") "PROJ-9"))
+      (goto-char (point-min))
+      (search-forward "* Fix login")
+      (should (equal (org-entry-get (point) "JIRA_KEY") "PROJ-100")))))
 
 (provide 'org-tickets-test-sync-flow)
 ;;; org-tickets-test-sync-flow.el ends here

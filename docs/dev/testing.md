@@ -32,8 +32,8 @@ Test files mirror source modules:
 
 | Source | Test file |
 |--------|-----------|
-| `org-tickets-core.el` | `org-tickets-test-record.el` (the `org-tickets--define-record` macro), `org-tickets-test-options.el` (the `org-tickets-needs-sizing-label` and `org-tickets-fix-version-months` options) |
-| `org-tickets-api.el` (config, credentials, request encoding, HTTP response parsing, issue types) | `org-tickets-test-api.el` |
+| `org-tickets-core.el` | `org-tickets-test-record.el` (the `org-tickets--define-record` macro, `--alist-get`, `--ensure-list`), `org-tickets-test-options.el` (the `org-tickets-needs-sizing-label` and `org-tickets-fix-version-months` options) |
+| `org-tickets-api.el` (config, credentials, request encoding, HTTP response parsing, issue types, sprint listing/resolution, issue accessors) | `org-tickets-test-api.el` |
 | `org-tickets-async.el` | `org-tickets-test-async.el` (async requests, batching, rate limiting, progress) |
 | `org-tickets-parse.el` | `org-tickets-test-parse.el` |
 | `org-tickets-fields.el` | `org-tickets-test-fields.el` |
@@ -44,8 +44,8 @@ Test files mirror source modules:
 | `org-tickets-attachments.el` | `org-tickets-test-attachments-upload.el`, `org-tickets-test-attachments-sync.el`, `org-tickets-test-attachments-async.el` |
 | `org-tickets-links.el` | `org-tickets-test-sync-links.el` (Blocks link creation and per-ticket link sync) |
 | `org-tickets-inherit.el` | `org-tickets-test-inheritance.el` (DUE_DATE/FIX_VERSION inheritance), `org-tickets-test-sync-due-date.el` (due date in payloads and external parents) |
-| `org-tickets-sync-phases.el` | `org-tickets-test-sync-flow.el` (whole pipeline, phase ordering, buffer protection, BLOCKED-BY write-back), `org-tickets-test-sync-flow-phase2.el` (attachment thunks) |
-| `org-tickets-sync.el` | `org-tickets-test-sync.el` (org property helpers, payloads), `org-tickets-test-sync-sprint.el` (sprint resolution and listing, fix version payloads) |
+| `org-tickets-sync-phases.el` | `org-tickets-test-sync-flow.el` (whole pipeline, phase ordering, buffer protection, key write-back, BLOCKED-BY write-back), `org-tickets-test-sync-flow-phase2.el` (attachment thunks) |
+| `org-tickets-sync.el` | `org-tickets-test-sync.el` (org property helpers, payloads), `org-tickets-test-sync-sprint.el` (sprint and fix version in create/update payloads) |
 | `org-tickets-cmd.el` | `org-tickets-test-cmd.el`, `org-tickets-test-cmd-ticket-at-point.el` (commands run from inside a ticket's description headings) |
 
 Test files live in `test/` and are loaded by `test/org-tickets-test.el` (the test runner entry point), which holds only `require`s; each test file `provide`s its own feature and passes when loaded on its own. Put a test in the file for the module it exercises, not the one that happens to share its fixtures.

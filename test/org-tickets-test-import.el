@@ -22,13 +22,6 @@
 
 ;;;; ensure-list
 
-(ert-deftest org-tickets-test--ensure-list-normalizes-shapes ()
-  "Vectors become lists, lists pass through, nil stays nil, atoms are wrapped."
-  (should (equal (org-tickets--ensure-list [1 2 3]) '(1 2 3)))
-  (should (equal (org-tickets--ensure-list '((a . 1) (b . 2))) '((a . 1) (b . 2))))
-  (should (equal (org-tickets--ensure-list nil) nil))
-  (should (equal (org-tickets--ensure-list "x") '("x"))))
-
 ;;;; Pull Remote / Update Heading Tests
 
 (ert-deftest org-tickets-test--update-org-heading-from-ticket-updates-properties ()
@@ -305,31 +298,48 @@ When neither numeric ID nor mediaApiFileId matches, the alt attribute
     (org-tickets--issue-to-org (apply #'org-tickets--ticket-create slots))
     (buffer-string)))
 
+(defun org-tickets-test--imported-props (props &rest slots)
+  "Import a ticket built from SLOTS; return PROPS read from its heading.
+The result is an alist of (PROPERTY . VALUE) read with `org-entry-get' at
+the imported heading, plus (:heading . TITLE)."
+  (with-temp-buffer
+    (org-mode)
+    (org-tickets--issue-to-org (apply #'org-tickets--ticket-create slots))
+    (goto-char (point-min))
+    (cons (cons :heading (org-get-heading t t t t))
+          (mapcar (lambda (prop) (cons prop (org-entry-get (point) prop)))
+                  props))))
+
 (ert-deftest org-tickets-test--issue-to-org-feature ()
   "A feature imports as a level-1 heading carrying its properties."
-  (let ((text (org-tickets-test--issue-org-text
-               :key "PROJ-100" :type "Feature" :summary "Test Feature"
-               :description "Feature description" :fix-version "v1.0"
-               :labels '("label1" "label2"))))
-    (should (string-match-p "^\\* Test Feature$" text))
-    (should (string-match-p ":JIRA_KEY: +PROJ-100$" text))
-    (should (string-match-p ":JIRA_TYPE: +Feature$" text))
-    (should (string-match-p ":FIX_VERSION: +v1.0$" text))
-    (should (string-match-p ":LABELS: +label1,label2$" text))
-    (should (string-match-p "^Feature description$" text))))
+  (should (equal (org-tickets-test--imported-props
+                  '("JIRA_KEY" "JIRA_TYPE" "FIX_VERSION" "LABELS")
+                  :key "PROJ-100" :type "Feature" :summary "Test Feature"
+                  :description "Feature description" :fix-version "v1.0"
+                  :labels '("label1" "label2"))
+                 '((:heading . "Test Feature") ("JIRA_KEY" . "PROJ-100")
+                   ("JIRA_TYPE" . "Feature") ("FIX_VERSION" . "v1.0")
+                   ("LABELS" . "label1,label2"))))
+  (should (string-match-p
+           "^\\* Test Feature$"
+           (org-tickets-test--issue-org-text
+            :key "PROJ-100" :type "Feature" :summary "Test Feature"))))
 
 (ert-deftest org-tickets-test--issue-to-org-story ()
   "A story imports one level below the top, with links and points as properties."
-  (let ((text (org-tickets-test--issue-org-text
-               :key "PROJ-200" :type "Story" :summary "Test Story"
-               :description "Story description" :labels '("NeedsSizing")
-               :story-points 5 :blocks '("PROJ-300") :blocked-by '("PROJ-100")
-               :parent "PROJ-100")))
-    (should (string-match-p "^\\*\\* Test Story$" text))
-    (should (string-match-p ":PARENT: +PROJ-100$" text))
-    (should (string-match-p ":STORY_POINTS: +5$" text))
-    (should (string-match-p ":BLOCKS: +PROJ-300$" text))
-    (should (string-match-p ":BLOCKED-BY: +PROJ-100$" text))))
+  (should (equal (org-tickets-test--imported-props
+                  '("JIRA_KEY" "PARENT" "STORY_POINTS" "BLOCKS" "BLOCKED-BY")
+                  :key "PROJ-200" :type "Story" :summary "Test Story"
+                  :description "Story description" :labels '("NeedsSizing")
+                  :story-points 5 :blocks '("PROJ-300")
+                  :blocked-by '("PROJ-100") :parent "PROJ-100")
+                 '((:heading . "Test Story") ("JIRA_KEY" . "PROJ-200")
+                   ("PARENT" . "PROJ-100") ("STORY_POINTS" . "5")
+                   ("BLOCKS" . "PROJ-300") ("BLOCKED-BY" . "PROJ-100"))))
+  (should (string-match-p
+           "^\\*\\* Test Story$"
+           (org-tickets-test--issue-org-text
+            :key "PROJ-200" :type "Story" :summary "Test Story"))))
 
 (ert-deftest org-tickets-test--issue-to-org-keeps-description-paragraphs ()
   "Description paragraphs, and the blank line between them, are preserved."
@@ -394,12 +404,13 @@ When neither numeric ID nor mediaApiFileId matches, the alt attribute
                  (org-tickets--parse-jira-issue without)))))
 
 (ert-deftest org-tickets-test--issue-to-org-writes-due-date ()
-  "A ticket's due date is written as the DUE_DATE property."
-  (should (string-match-p
-           ":DUE_DATE: +2026-06-15$"
-           (org-tickets-test--issue-org-text
-            :key "PROJ-100" :type "Feature" :summary "Test Feature"
-            :due-date "2026-06-15"))))
+  "A ticket's due date is written as the heading's DUE_DATE property."
+  (should (equal (cdr (assoc "DUE_DATE"
+                             (org-tickets-test--imported-props
+                              '("DUE_DATE")
+                              :key "PROJ-100" :type "Feature"
+                              :summary "Test Feature" :due-date "2026-06-15")))
+                 "2026-06-15")))
 
 ;;;; Parse-failure fallback
 

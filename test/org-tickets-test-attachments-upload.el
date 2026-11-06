@@ -105,31 +105,6 @@
                                             (setq callback-result (list results err))))
       (should (equal callback-result (list nil nil))))))
 
-(ert-deftest org-tickets-test--issue-attachments-absent-or-null-is-nil ()
-  "An issue with no fields, or a null attachment field, has no attachments."
-  (should-not (org-tickets--issue-attachments
-               (org-tickets-test--json "{\"key\": \"PROJ-123\", \"id\": \"1\"}")))
-  (should-not (org-tickets--issue-attachments
-               (org-tickets-test--json
-                "{\"key\": \"PROJ-123\", \"fields\": {\"attachment\": null}}"))))
-
-(ert-deftest org-tickets-test--get-attachments-response-parsing ()
-  "Test that attachment ID can be extracted from issue endpoint response."
-  (let* ((issue-response (org-tickets-test--json "{\"expand\": \"names,schema\", \"key\": \"PROJ-12752\", \"id\": \"108903\", \"self\": \"https://your-domain.atlassian.net/rest/api/3/issue/108903\", \
-    \"fields\": {\"summary\": \"Test story\", \"attachment\": [{\"self\": \"https://your-domain.atlassian.net/rest/api/3/attachment/10001\", \
-    \"id\": \"10001\", \"filename\": \"screenshot.png\", \"content\": \"https://your-domain.atlassian.net/rest/api/3/attachment/content/10001\", \
-    \"thumbnail\": \"https://your-domain.atlassian.net/rest/api/3/attachment/thumbnail/10001\", \
-    \"mimeType\": \"image/png\", \"size\": 45678, \"created\": \"2024-10-15T10:30:00.000Z\", \
-    \"author\": {\"accountId\": \"123456789\", \"displayName\": \"Test User\"}}]}}")))
-    (let ((attachments (org-tickets--issue-attachments issue-response)))
-      (should attachments)
-      (let ((attachment (car attachments)))
-        (should (string= (org-tickets--attachment-id attachment) "10001"))
-        (should (string= (org-tickets--attachment-filename attachment) "screenshot.png"))
-        (should (string= (org-tickets--attachment-content-url attachment)
-                         "https://your-domain.atlassian.net/rest/api/3/attachment/content/10001"))
-        (should (equal (org-tickets--alist-get "size" attachment) 45678))))))
-
 (ert-deftest org-tickets-test--get-attachments-parses-real-response-shape ()
   "json.el produces SYMBOL keys; (assoc \"fields\" ...) matched nothing,
 so this function returned nil for every real response."

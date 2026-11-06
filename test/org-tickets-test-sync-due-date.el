@@ -14,9 +14,9 @@
         (org-tickets-test--fake-jira-handler :post-keys '("PROJ-9") :log requests)
       (org-tickets--create-ticket
        (org-tickets--ticket-create :type "Story" :summary "S" :due-date due-date)))
-    (org-tickets-test--payload-field
-     (nth 2 (car (org-tickets-test--requests requests "POST" "/rest/api/3/issue")))
-     'duedate)))
+    (let ((posts (org-tickets-test--requests requests "POST" "/rest/api/3/issue")))
+      (should (= 1 (length posts)))
+      (org-tickets-test--payload-field (nth 2 (car posts)) 'duedate))))
 
 (ert-deftest org-tickets-test--due-date-sent-in-create ()
   "Creating a ticket with a due date POSTs it as duedate."

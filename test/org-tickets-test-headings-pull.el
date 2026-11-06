@@ -166,18 +166,23 @@ whole and do not create extra tickets."
                      (2 . "Sub"))))))
 
 (ert-deftest org-tickets-test--headings-import-story ()
+  "Check: headings import story."
   (org-tickets-test--assert-imported-headings "Story" "S"))
 
 (ert-deftest org-tickets-test--headings-import-feature ()
+  "Check: headings import feature."
   (org-tickets-test--assert-imported-headings "Feature" "F"))
 
 (ert-deftest org-tickets-test--headings-import-new-feature ()
+  "Check: headings import new feature."
   (org-tickets-test--assert-imported-headings "New Feature" "N"))
 
 (ert-deftest org-tickets-test--headings-import-improvement ()
+  "Check: headings import improvement."
   (org-tickets-test--assert-imported-headings "Improvement" "I"))
 
 (ert-deftest org-tickets-test--headings-import-bug ()
+  "Check: headings import bug."
   (org-tickets-test--assert-imported-headings "Bug" "B"))
 
 (ert-deftest org-tickets-test--headings-import-feature-then-story ()
@@ -291,18 +296,23 @@ and the pulled description must parse back unchanged."
   "A description exercising every heading level transition kind.")
 
 (ert-deftest org-tickets-test--headings-roundtrip-story ()
+  "Check: headings roundtrip story."
   (org-tickets-test--assert-fixpoint "Story" "**" org-tickets-test--rich-heading-description))
 
 (ert-deftest org-tickets-test--headings-roundtrip-feature ()
+  "Check: headings roundtrip feature."
   (org-tickets-test--assert-fixpoint "Feature" "*" org-tickets-test--rich-heading-description))
 
 (ert-deftest org-tickets-test--headings-roundtrip-new-feature ()
+  "Check: headings roundtrip new feature."
   (org-tickets-test--assert-fixpoint "New Feature" "*" org-tickets-test--rich-heading-description))
 
 (ert-deftest org-tickets-test--headings-roundtrip-improvement ()
+  "Check: headings roundtrip improvement."
   (org-tickets-test--assert-fixpoint "Improvement" "*" org-tickets-test--rich-heading-description))
 
 (ert-deftest org-tickets-test--headings-roundtrip-epic ()
+  "Check: headings roundtrip epic."
   (org-tickets-test--assert-fixpoint "Epic" "*" org-tickets-test--rich-heading-description))
 
 (ert-deftest org-tickets-test--headings-roundtrip-every-level-pair ()

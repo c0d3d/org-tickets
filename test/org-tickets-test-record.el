@@ -34,6 +34,7 @@
 (require 'ert)
 
 (require 'org-tickets)
+(require 'org-tickets-test-fixtures)
 
 ;;;; Record types used only by these tests
 
@@ -349,6 +350,20 @@ Guards against a slot being dropped or its accessor index drifting."
       (let ((accessor (intern (format "org-tickets--ticket-%s" slot))))
         (should (fboundp accessor))
         (should (equal (format "value-of-%s" slot) (funcall accessor tk)))))))
+
+(ert-deftest org-tickets-test--alist-get-reads-symbol-keyed-json ()
+  "A string key finds its value in a parsed (symbol-keyed) JSON response."
+  (let ((api-response (org-tickets-test--json "{\"key\": \"PROJ-123\", \"id\": \"12345\"}")))
+    (should (null (assoc "key" api-response)))
+    (should (string= (org-tickets--alist-get "key" api-response) "PROJ-123"))))
+
+
+(ert-deftest org-tickets-test--ensure-list-normalizes-shapes ()
+  "Vectors become lists, lists pass through, nil stays nil, atoms are wrapped."
+  (should (equal (org-tickets--ensure-list [1 2 3]) '(1 2 3)))
+  (should (equal (org-tickets--ensure-list '((a . 1) (b . 2))) '((a . 1) (b . 2))))
+  (should (equal (org-tickets--ensure-list nil) nil))
+  (should (equal (org-tickets--ensure-list "x") '("x"))))
 
 (provide 'org-tickets-test-record)
 ;;; org-tickets-test-record.el ends here

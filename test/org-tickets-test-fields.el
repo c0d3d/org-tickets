@@ -40,6 +40,7 @@
   (cdr (assq (intern name) fields)))
 
 (ert-deftest org-tickets-test--ticket-fields-update-basic ()
+  "Check: ticket fields update basic."
   (let* ((ticket (org-tickets--ticket-create
                   :key "P-1" :type "Story" :summary "S"
                   :description "body" :fix-version "Aug2026"
@@ -70,6 +71,7 @@ relationship.  Guards against reintroducing the parent push."
     (should-not (org-tickets-test--fields-get fields "parent"))))
 
 (ert-deftest org-tickets-test--ticket-fields-feature-maps-to-new-feature ()
+  "Check: ticket fields feature maps to new feature."
   (let* ((org-tickets-project-id "12345")
          (org-tickets--issue-type-ids '(("New Feature" . "2")))
          (fields (org-tickets--ticket-fields
@@ -78,6 +80,7 @@ relationship.  Guards against reintroducing the parent push."
     (should (equal (org-tickets-test--fields-get fields "issuetype") '(("id" . "2"))))))
 
 (ert-deftest org-tickets-test--ticket-fields-unknown-type-errors-clearly ()
+  "Check: ticket fields unknown type errors clearly."
   (let ((org-tickets-project-id "12345")
         (org-tickets--issue-type-ids '(("Story" . "1"))))
     (should-error (org-tickets--ticket-fields
@@ -100,6 +103,7 @@ relationship.  Guards against reintroducing the parent push."
       (should (string-match-p "\"customfield_10016\":null" (json-encode fields))))))
 
 (ert-deftest org-tickets-test--parse-populates-clear-flags ()
+  "Check: parse populates clear flags."
   (with-temp-buffer
     (org-mode)
     (insert "* T\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-1\n"
