@@ -107,18 +107,6 @@ stores in :post-blank is re-emitted as an unmarked text node."
     (append (org-tickets--adf-add-mark inner (list (cons "type" mark-type)))
             (org-tickets--adf-text-node post))))
 
-(defun org-tickets--convert-to-adf-nil (_element)
-  "Convert org _ELEMENT (type nil) to ADF content."
-  nil)
-
-(defun org-tickets--convert-to-adf-org-data (element)
-  "Convert org ELEMENT (type org-data) to ADF content."
-  (mapcan #'org-tickets--convert-to-adf-content (org-element-contents element)))
-
-(defun org-tickets--convert-to-adf-section (element)
-  "Convert org ELEMENT (type section) to ADF content."
-  (mapcan #'org-tickets--convert-to-adf-content (org-element-contents element)))
-
 (defun org-tickets--convert-to-adf-headline (element)
   "Convert org ELEMENT (type headline) to an ADF heading and its body.
 Org level 3 (`***') is h1 and each extra star one level deeper, clamped
@@ -221,22 +209,6 @@ line in Jira (e.g. inside a list item)."
         (when para-content
           (list (org-tickets--adf-node "paragraph" nil para-content))))))
 
-(defun org-tickets--convert-to-adf-bold (element)
-  "Convert org ELEMENT (type bold) to an ADF text node with a strong mark."
-  (org-tickets--convert-inline-marked element "strong"))
-
-(defun org-tickets--convert-to-adf-italic (element)
-  "Convert org ELEMENT (type italic) to an ADF text node with an em mark."
-  (org-tickets--convert-inline-marked element "em"))
-
-(defun org-tickets--convert-to-adf-strike-through (element)
-  "Convert org ELEMENT (type strike-through) to a strike-marked text node."
-  (org-tickets--convert-inline-marked element "strike"))
-
-(defun org-tickets--convert-to-adf-underline (element)
-  "Convert org ELEMENT (type underline) to an underline-marked text node."
-  (org-tickets--convert-inline-marked element "underline"))
-
 (defun org-tickets--convert-value-code-marked (element)
   "Convert an inline ELEMENT with a :value to a code-marked text node.
 The code mark covers only the value; the trailing space org stores in
@@ -246,10 +218,6 @@ not render the code styling over the trailing space."
            (or (org-element-property :value element) "") "code")
           (org-tickets--adf-text-node
            (org-tickets--adf-post-blank-spaces element))))
-
-(defun org-tickets--convert-to-adf-code (element)
-  "Convert org ELEMENT (type code or verbatim) to a code-marked text node."
-  (org-tickets--convert-value-code-marked element))
 
 (defun org-tickets--attachment-media-uuid (filename attachments)
   "Return the media UUID for FILENAME in ATTACHMENTS, or nil.
@@ -325,12 +293,6 @@ attribute."
            (mapcan #'org-tickets--convert-to-adf-list-item
                    (org-element-contents element))))))
 
-(defun org-tickets--convert-to-adf-item (element)
-  "Convert org ELEMENT (type item) to ADF content."
-  (mapcan (lambda (elem)
-            (org-tickets--convert-to-adf-content elem))
-          (org-element-contents element)))
-
 (defun org-tickets--convert-to-adf-list-item (element)
   "Convert org ELEMENT (type item) to an ADF listItem.
 Contents, nested lists included, keep their document order."
@@ -353,32 +315,6 @@ Contents, nested lists included, keep their document order."
   "Convert org ELEMENT (type timestamp) to its literal raw value as text."
   (org-tickets--convert-literal-text
    element (org-element-property :raw-value element)))
-
-(defun org-tickets--convert-to-adf-inline-src-block (element)
-  "Convert org ELEMENT (type inline-src-block) to a code-marked text node."
-  (org-tickets--convert-value-code-marked element))
-
-(defun org-tickets--convert-to-adf-statistics-cookie (element)
-  "Convert org ELEMENT (type statistics-cookie, e.g. [1/2]) to literal text."
-  (org-tickets--convert-literal-text
-   element (org-element-property :value element)))
-
-(defun org-tickets--convert-to-adf-latex-fragment (element)
-  "Convert org ELEMENT (type latex-fragment) to its literal source text."
-  (org-tickets--convert-literal-text
-   element (org-element-property :value element)))
-
-(defun org-tickets--convert-to-adf-export-snippet (element)
-  "Convert org ELEMENT (type export-snippet) to a code-marked text node."
-  (org-tickets--convert-value-code-marked element))
-
-(defun org-tickets--convert-to-adf-example-block (element)
-  "Convert org ELEMENT (type example-block) to an ADF codeBlock."
-  (org-tickets--adf-code-block (org-element-property :value element)))
-
-(defun org-tickets--convert-to-adf-fixed-width (element)
-  "Convert org ELEMENT (type fixed-width) to an ADF codeBlock."
-  (org-tickets--adf-code-block (org-element-property :value element)))
 
 (defun org-tickets--convert-to-adf-latex-environment (element)
   "Convert org ELEMENT (type latex-environment) to an ADF codeBlock."
@@ -475,7 +411,7 @@ has no header row."
   (seq-some (lambda (row) (eq (org-element-property :type row) 'rule))
             (org-element-contents element)))
 
-(defun org-tickets--convert-to-adf-table (element &optional _is-header)
+(defun org-tickets--convert-to-adf-table (element)
   "Convert org ELEMENT (type table) to ADF content.
 Row 0 becomes a header row only when the table has a rule separator."
   (let* ((has-header (org-tickets--table-has-header-p element))
@@ -483,79 +419,66 @@ Row 0 becomes a header row only when the table has a rule separator."
                              (or (eq (org-element-property :type row) 'rule)
                                  (null (org-element-contents row))))
                            (org-element-contents element)))
-         (row-index 0))
+         (row-index -1))
     (list (org-tickets--adf-node
            "table"
            (list (cons "layout" "default"))
-           (mapcan (lambda (row)
-                     (let ((result (org-tickets--convert-to-adf-content
-                                    row (and has-header (= row-index 0)))))
-                       (setq row-index (1+ row-index))
-                       result))
+           (mapcar (lambda (row)
+                     (setq row-index (1+ row-index))
+                     (org-tickets--convert-to-adf-table-row
+                      row (and has-header (= row-index 0))))
                    rows)))))
 
-(defun org-tickets--convert-to-adf-table-row (element &optional is-header)
-  "Convert org ELEMENT (type table-row) to ADF content.
-IS-HEADER is passed to child table cells."
-  (let ((cells (org-element-contents element)))
-    (when cells
-      (list (list (cons "type" "tableRow")
-                  (cons "content" (mapcan (lambda (cell)
-                                            (org-tickets--convert-to-adf-content cell is-header))
-                                          cells)))))))
+(defun org-tickets--convert-to-adf-table-row (element header-p)
+  "Convert org ELEMENT (type table-row) to an ADF tableRow.
+HEADER-P makes its cells tableHeader nodes."
+  (org-tickets--adf-node
+   "tableRow" nil
+   (mapcan (lambda (cell)
+             (org-tickets--convert-to-adf-table-cell cell header-p))
+           (org-element-contents element))))
 
-(defun org-tickets--convert-to-adf-table-cell (element &optional is-header)
+(defun org-tickets--convert-to-adf-table-cell (element header-p)
   "Convert org ELEMENT (type table-cell) to ADF content.
-IS-HEADER selects the tableHeader node type per the ADF schema."
+HEADER-P selects the tableHeader node type per the ADF schema."
   (let* ((text-nodes (mapcan (lambda (elem)
                                (if (stringp elem)
                                    (let ((text (substring-no-properties elem)))
                                      (when (> (length (string-trim text)) 0)
                                        (org-tickets--adf-text-node
                                         (string-trim-right text))))
-                                 (org-tickets--convert-to-adf-content elem is-header)))
+                                 (org-tickets--convert-to-adf-content elem)))
                              (org-element-contents element)))
-         (paragraph (if text-nodes
-                        (org-tickets--adf-node "paragraph" nil text-nodes)
-                      (org-tickets--adf-node "paragraph"))))
-    (list (org-tickets--adf-node (if is-header "tableHeader" "tableCell")
-                              nil
-                              (list paragraph)))))
+         (paragraph (org-tickets--adf-node "paragraph" nil text-nodes)))
+    (list (org-tickets--adf-node (if header-p "tableHeader" "tableCell")
+                                 nil (list paragraph)))))
 
-(defun org-tickets--convert-to-adf-default (element)
-  "Convert org ELEMENT (unknown type) to ADF content."
-  (mapcan #'org-tickets--convert-to-adf-content
-          (org-element-contents element)))
-
-(defun org-tickets--convert-to-adf-content (element &optional is-header)
+(defun org-tickets--convert-to-adf-content (element)
   "Convert org ELEMENT to Atlassian Document Format (ADF) content.
-IS-HEADER is an optional flag indicating if element is in a table header row.
-Returns an ADF content node (list with type and content properties)."
+Returns a list of ADF nodes.  Unknown and container types (org-data,
+section, item) convert their contents."
   (pcase (org-element-type element)
-    (`nil (org-tickets--convert-to-adf-nil element))
-    (`org-data (org-tickets--convert-to-adf-org-data element))
-    (`section (org-tickets--convert-to-adf-section element))
+    (`nil nil)
     (`headline (org-tickets--convert-to-adf-headline element))
     (`paragraph (org-tickets--convert-to-adf-paragraph element))
-    (`bold (org-tickets--convert-to-adf-bold element))
-    (`italic (org-tickets--convert-to-adf-italic element))
-    ((or `code `verbatim) (org-tickets--convert-to-adf-code element))
+    (`bold (org-tickets--convert-inline-marked element "strong"))
+    (`italic (org-tickets--convert-inline-marked element "em"))
+    (`strike-through (org-tickets--convert-inline-marked element "strike"))
+    (`underline (org-tickets--convert-inline-marked element "underline"))
+    ((or `code `verbatim `inline-src-block `export-snippet)
+     (org-tickets--convert-value-code-marked element))
     (`link (org-tickets--convert-to-adf-link element))
     (`plain-list (org-tickets--convert-to-adf-list element))
-    (`item (org-tickets--convert-to-adf-item element))
     (`line-break (org-tickets--convert-to-adf-line-break element))
     (`subscript (org-tickets--convert-to-adf-subscript element))
     (`superscript (org-tickets--convert-to-adf-superscript element))
-    (`strike-through (org-tickets--convert-to-adf-strike-through element))
-    (`underline (org-tickets--convert-to-adf-underline element))
     (`entity (org-tickets--convert-to-adf-entity element))
     (`timestamp (org-tickets--convert-to-adf-timestamp element))
-    (`inline-src-block (org-tickets--convert-to-adf-inline-src-block element))
-    (`statistics-cookie (org-tickets--convert-to-adf-statistics-cookie element))
-    (`latex-fragment (org-tickets--convert-to-adf-latex-fragment element))
-    (`export-snippet (org-tickets--convert-to-adf-export-snippet element))
-    (`example-block (org-tickets--convert-to-adf-example-block element))
-    (`fixed-width (org-tickets--convert-to-adf-fixed-width element))
+    ((or `statistics-cookie `latex-fragment)
+     (org-tickets--convert-literal-text
+      element (org-element-property :value element)))
+    ((or `example-block `fixed-width)
+     (org-tickets--adf-code-block (org-element-property :value element)))
     (`latex-environment (org-tickets--convert-to-adf-latex-environment element))
     (`export-block (org-tickets--convert-to-adf-export-block element))
     (`horizontal-rule (org-tickets--convert-to-adf-horizontal-rule element))
@@ -564,10 +487,9 @@ Returns an ADF content node (list with type and content properties)."
     (`macro (org-tickets--convert-to-adf-macro element))
     (`plain-text (org-tickets--convert-to-adf-plain-text element))
     (`src-block (org-tickets--convert-to-adf-src-block element))
-    (`table (org-tickets--convert-to-adf-table element is-header))
-    (`table-row (org-tickets--convert-to-adf-table-row element is-header))
-    (`table-cell (org-tickets--convert-to-adf-table-cell element is-header))
-    (_ (org-tickets--convert-to-adf-default element))))
+    (`table (org-tickets--convert-to-adf-table element))
+    (_ (mapcan #'org-tickets--convert-to-adf-content
+               (org-element-contents element)))))
 
 (defun org-tickets--build-adf-description (content &optional attachments)
   "Build ADF document structure from CONTENT string.
@@ -575,18 +497,18 @@ Parses CONTENT as Org text and converts to ADF format.
 ATTACHMENTS is an optional list of Jira attachment metadata alists
 with keys \"id\", \"filename\", and \"mediaApiFileId\", used to
 resolve attachment: links to ADF media nodes."
-  (if (or (null content) (string= content ""))
-      nil
-    (let ((org-tickets--adf-attachments attachments))
+  (unless (string-empty-p (or content ""))
+    (let ((org-tickets--adf-attachments attachments)
+          adf-content)
       (with-temp-buffer
         (insert content)
         (org-mode)
-        (let ((ast (org-element-parse-buffer)))
-          (let ((adf-content (org-tickets--convert-to-adf-content ast)))
-            (when adf-content
-              (append (list (cons "type" "doc")
-                            (cons "version" 1))
-                      (list (cons "content" adf-content))))))))))
+        (setq adf-content
+              (org-tickets--convert-to-adf-content (org-element-parse-buffer))))
+      (when adf-content
+        (list (cons "type" "doc")
+              (cons "version" 1)
+              (cons "content" adf-content))))))
 
 (provide 'org-tickets-convert)
 
