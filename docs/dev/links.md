@@ -53,7 +53,7 @@ child blocks the parent). org-tickets **never** writes Jira's real `parent`
   a Feature/Improvement, including custom types such as `Merge`)
   nested under a Feature/Improvement heading, **or** carrying an explicit
   `PARENT: KEY`, produces a "Blocks" link from the child to that parent.
-  This happens in `org-tickets--async-sync-ticket-links` (`org-tickets-sync.el`),
+  This happens in `org-tickets--async-sync-ticket-links` (`org-tickets-links.el`),
   during phase 2 — not in the create payload. See
   [inheritance.md](inheritance.md) for the type lists.
 - `org-tickets--ticket-fields` (`org-tickets-fields.el`) deliberately builds no

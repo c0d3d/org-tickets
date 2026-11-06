@@ -2,7 +2,7 @@
 
 A child ticket with no value of its own takes its parent's. The inherited
 properties are listed in `org-tickets--inherited-properties`
-(`org-tickets-sync.el`):
+(`org-tickets-inherit.el`):
 
 | Property | Jira field |
 |---|---|

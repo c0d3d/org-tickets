@@ -30,6 +30,8 @@
 (require 'org-tickets-convert)
 (require 'org-tickets-attachments)
 (require 'org-tickets-async)
+(require 'org-tickets-links)
+(require 'org-tickets-inherit)
 (require 'org-tickets-sync-phases)
 (require 'org-tickets-import)
 
@@ -159,128 +161,6 @@ VERSION is the Fix Version string (e.g., \"Aug2026\")."
   (org-tickets--with-ticket-at-key ticket-key
     (org-entry-put (point) "FIX_VERSION" version)))
 
-(defconst org-tickets--inherited-properties '("DUE_DATE" "FIX_VERSION")
-  "Drawer properties a ticket takes from its parent when it has none.
-Both are payload fields (`duedate' and `fixVersions'), so inheritance
-has to happen before the sync builds its requests.")
-
-(defun org-tickets--fields-due-date (fields)
-  "Return the duedate in Jira issue FIELDS, or nil."
-  (org-tickets--alist-get "duedate" fields))
-
-(defconst org-tickets--remote-inherited-fields
-  '(("DUE_DATE" . org-tickets--fields-due-date)
-    ("FIX_VERSION" . org-tickets--first-fix-version-name))
-  "Inherited properties read from Jira when the PARENT is not in the buffer.
-Each maps to a function of the issue's fields that returns the value.")
-
-(defvar org-tickets--remote-parent-cache nil
-  "Hash of parent key to its Jira issue, bound for one inheritance pass.")
-
-(defun org-tickets--fetch-parent-issue (parent-key)
-  "Return the Jira issue PARENT-KEY, or nil when the fetch fails."
-  (condition-case err
-      (org-tickets--get-ticket parent-key)
-    (error
-     (message "org-tickets: could not fetch parent %s: %s"
-              parent-key (error-message-string err))
-     nil)))
-
-(defun org-tickets--remote-parent-issue (parent-key)
-  "Return the Jira issue PARENT-KEY, fetching it at most once per pass.
-Fetches uncached when no pass has bound `org-tickets--remote-parent-cache'.
-Returns nil when the fetch fails."
-  (if (not org-tickets--remote-parent-cache)
-      (org-tickets--fetch-parent-issue parent-key)
-    (let ((cached (gethash parent-key org-tickets--remote-parent-cache 'missing)))
-      (if (not (eq cached 'missing))
-          cached
-        (puthash parent-key (org-tickets--fetch-parent-issue parent-key)
-                 org-tickets--remote-parent-cache)))))
-
-(defun org-tickets--remote-parent-property (parent-key property)
-  "Return PARENT-KEY's PROPERTY as Jira has it, or nil.
-Only properties in `org-tickets--remote-inherited-fields' are looked up."
-  (let ((extract (cdr (assoc property org-tickets--remote-inherited-fields))))
-    (when extract
-      (let ((value (funcall extract
-                            (org-tickets--alist-get
-                             "fields" (org-tickets--remote-parent-issue parent-key)))))
-        (and (stringp value) (not (string-blank-p value)) value)))))
-
-(defun org-tickets--ancestor-property (property)
-  "Return PROPERTY of the nearest ancestor ticket heading carrying it, or nil."
-  (save-excursion
-    (catch 'ancestor-value
-      (while (org-up-heading-safe)
-        (when (org-entry-get (point) "JIRA_TYPE")
-          (let ((value (org-tickets--heading-property property)))
-            (when value
-              (throw 'ancestor-value value))))))))
-
-(defun org-tickets--parent-key-property (parent-key property)
-  "Return PROPERTY of the ticket PARENT-KEY, or nil.
-Read from its heading when it is in the buffer, otherwise from Jira."
-  (let ((parent-pos (org-tickets--find-ticket-by-key parent-key)))
-    (if parent-pos
-        (save-excursion
-          (goto-char parent-pos)
-          (org-tickets--heading-property property))
-      (org-tickets--remote-parent-property parent-key property))))
-
-(defun org-tickets--explicit-parent-property (property)
-  "Return PROPERTY of the ticket named by the heading's PARENT, or nil."
-  (let ((parent-key (org-entry-get (point) "PARENT")))
-    (when (org-tickets--valid-ticket-key-p parent-key)
-      (org-tickets--parent-key-property parent-key property))))
-
-(defun org-tickets--parent-property (property)
-  "Return the PROPERTY value the ticket heading at point inherits, or nil.
-Prefers the ticket named by the heading's PARENT property, which need
-not be an outline ancestor nor in the buffer -- it is also the ticket the
-\"Blocks\" link goes to.  Failing that, the nearest ancestor ticket
-heading that carries PROPERTY.  Non-ticket headings are never a source:
-only headings with a JIRA_TYPE count."
-  (or (org-tickets--explicit-parent-property property)
-      (org-tickets--ancestor-property property)))
-
-(defun org-tickets--inherit-parent-property-at-point (property)
-  "Set PROPERTY on the heading at point from its parent when it is empty.
-A value the heading already carries is left alone."
-  (unless (org-tickets--heading-property property)
-    (let ((inherited (org-tickets--parent-property property)))
-      (when inherited
-        (org-entry-put (point) property inherited)))))
-
-(defun org-tickets--inherit-parent-properties-in-buffer ()
-  "Fill every ticket heading's empty `org-tickets--inherited-properties'.
-Runs before the sync parses the document, so an inherited value is part
-of the same create/update payload Jira receives -- inheriting only after
-the requests were sent left Jira with an empty due date until the next
-sync, and fix version was never inherited at all.  Walking top-down
-cascades: a heading that just inherited is the source for its own
-children.  A heading that already carries the property is left alone;
-its value wins over the parent's."
-  (let ((org-tickets--remote-parent-cache (make-hash-table :test #'equal)))
-    (org-map-entries
-     (lambda ()
-       (when (org-entry-get (point) "JIRA_TYPE")
-         (mapc #'org-tickets--inherit-parent-property-at-point
-               org-tickets--inherited-properties))))))
-
-(defun org-tickets--inherit-due-date (story-key feature-key)
-  "Inherit due date from parent Feature/Improvement to Story if not already set.
-STORY-KEY is the Story ticket key.
-FEATURE-KEY is the parent Feature/Improvement key.
-Only sets the due date if the Story doesn't already have one.  A
-FEATURE-KEY absent from the buffer is looked up in Jira."
-  (org-tickets--with-ticket-at-key story-key
-    (unless (org-tickets--heading-property "DUE_DATE")
-      (let ((parent-due-date (org-tickets--parent-key-property
-                              feature-key "DUE_DATE")))
-        (when parent-due-date
-          (org-entry-put (point) "DUE_DATE" parent-due-date))))))
-
 ;;;###autoload
 (defun org-tickets-update-story-sizing (story-key story-points)
   "Update story sizing for STORY-KEY.
@@ -329,46 +209,6 @@ other labels are never mangled."
 
 ;;;; Sync from Org to Jira
 
-(defun org-tickets--sync-save-point ()
-  "Record point and window scroll of the current buffer for later restore.
-Uses markers so the saved location rides along as sync inserts text."
-  (setq org-tickets--sync-saved-point (point-marker))
-  (let ((win (get-buffer-window (current-buffer))))
-    (setq org-tickets--sync-saved-window-start
-          (and win (copy-marker (window-start win))))))
-
-(defun org-tickets--sync-restore-point ()
-  "Restore point and window scroll saved by `org-tickets--sync-save-point'.
-Runs in the saved point's buffer.  Restores point, and if that buffer is
-displayed in a window, restores its scroll without stealing focus.
-Degrades gracefully if nothing was saved or the buffer was killed.
-Always releases the saved markers."
-  (let ((point-marker org-tickets--sync-saved-point)
-        (start-marker org-tickets--sync-saved-window-start))
-    (when (and (markerp point-marker) (buffer-live-p (marker-buffer point-marker)))
-      (with-current-buffer (marker-buffer point-marker)
-        (goto-char point-marker)
-        (let ((win (get-buffer-window (current-buffer))))
-          (when win
-            (when (and (markerp start-marker) (marker-position start-marker))
-              (set-window-start win start-marker))
-            (set-window-point win (point))))))
-    (when (markerp point-marker) (set-marker point-marker nil))
-    (when (markerp start-marker) (set-marker start-marker nil))
-    (setq org-tickets--sync-saved-point nil)
-    (setq org-tickets--sync-saved-window-start nil)))
-
-(defun org-tickets--sync-cleanup ()
-  "Clear sync-in-progress flag, unlock buffer, and remove progress indicator.
-Restores `buffer-read-only' to what it was before sync locked it, rather
-than always unlocking a buffer the user had deliberately made read-only.
-Also restores point and window scroll to where they were when sync began."
-  (setq buffer-read-only org-tickets--sync-prior-read-only)
-  (setq org-tickets--sync-prior-read-only nil)
-  (setq org-tickets--sync-in-progress nil)
-  (org-tickets--progress-clear)
-  (org-tickets--sync-restore-point))
-
 ;;;###autoload
 (defun org-tickets-sync-reset ()
   "Forcibly clear a stuck sync in the current buffer.
@@ -410,76 +250,6 @@ Phase 3: apply all results to the org buffer synchronously."
         (error
          (org-tickets--sync-cleanup)
          (message "org-tickets: Sync failed: %S" err))))))
-
-(defun org-tickets--set-org-sprint (ticket-key sprint)
-  "Set SPRINT property in org for TICKET-KEY."
-  (org-tickets--with-ticket-at-key ticket-key
-    (org-entry-put (point) "SPRINT" sprint)))
-
-(defun org-tickets--set-org-due-date (ticket-key due-date)
-  "Set the DUE_DATE property in org for TICKET-KEY to DUE-DATE."
-  (org-tickets--with-ticket-at-key ticket-key
-    (org-entry-put (point) "DUE_DATE" due-date)))
-
-(defun org-tickets--set-org-ticket-key (ticket key)
-  "Write KEY as JIRA_KEY on TICKET's heading, located via its marker.
-Markers survive the buffer edits earlier sync steps make, unlike the
-buffer positions captured at parse time."
-  (org-tickets--at-ticket-marker ticket
-    (org-entry-put (point) "JIRA_KEY" key)))
-
-(defun org-tickets--ticket-buffer-key (ticket)
-  "Read TICKET's current JIRA_KEY from the buffer via its marker.
-Picks up keys assigned earlier in the same sync run for tickets that
-were parsed without one.  Returns nil when unavailable."
-  (org-tickets--at-ticket-marker ticket
-    (org-tickets--heading-property "JIRA_KEY")))
-
-(defun org-tickets--link-done-callback (from-key to-key done)
-  "Return a callback for the FROM-KEY -> TO-KEY link that logs failures.
-The callback then calls DONE."
-  (lambda (_response err)
-    (when err
-      (message "org-tickets: failed to create link %s -> %s: %s"
-               from-key to-key err))
-    (funcall done nil nil)))
-
-(defun org-tickets--link-thunk (from-key to-key)
-  "Return a batch thunk that creates a \"Blocks\" link FROM-KEY -> TO-KEY.
-Failures are logged; the thunk always completes."
-  (lambda (done)
-    (org-tickets--async-create-link
-     from-key to-key "Blocks"
-     (org-tickets--link-done-callback from-key to-key done))))
-
-(defun org-tickets--ticket-link-thunks (ticket key)
-  "Return the link thunks TICKET (whose key is KEY) needs.
-Child tickets block their parent; BLOCKS entries are blocked by KEY and
-BLOCKED-BY entries block KEY.  Links from a ticket to itself are dropped."
-  (let* ((parent-key (and (org-tickets--child-type-p (org-tickets--ticket-type ticket))
-                          (org-tickets--ticket-parent-key ticket)))
-         (targets (seq-remove
-                   (lambda (to) (string= key to))
-                   (append (and (org-tickets--non-empty-string parent-key)
-                                (list parent-key))
-                           (org-tickets--ticket-blocks ticket))))
-         (blockers (seq-remove (lambda (from) (string= key from))
-                               (org-tickets--ticket-blocked-by ticket))))
-    (append (mapcar (lambda (to) (org-tickets--link-thunk key to)) targets)
-            (mapcar (lambda (from) (org-tickets--link-thunk from key)) blockers))))
-
-(defun org-tickets--async-sync-ticket-links (ticket _org-buffer callback)
-  "Asynchronously sync block relationships for TICKET.
-Collects all needed links (parent, blocks, blocked-by) and fires them
-concurrently via `org-tickets--async-batch'.  _ORG-BUFFER is unused;
-TICKET's marker locates its heading.  CALLBACK is called when all complete."
-  (let* ((key (or (org-tickets--ticket-key ticket)
-                  (org-tickets--ticket-buffer-key ticket)))
-         (thunks (and (org-tickets--non-empty-string key)
-                      (org-tickets--ticket-link-thunks ticket key))))
-    (if thunks
-        (org-tickets--async-batch thunks (lambda (_results) (funcall callback)))
-      (funcall callback))))
 
 (provide 'org-tickets-sync)
 

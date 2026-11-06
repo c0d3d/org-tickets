@@ -28,8 +28,6 @@
 (require 'org-tickets-core)
 (require 'org-tickets-fields)
 
-(declare-function org-tickets--async-request "org-tickets-async")
-
 ;;;; Jira API Client
 
 (defmacro org-tickets--require-config (internal-var custom-var)
@@ -300,18 +298,6 @@ ARGS is a plist of optional updates: :summary, :description,
     (when fields
       (org-tickets--api-request "PUT" (concat "/rest/api/3/issue/" ticket-key)
                              (list (cons 'fields fields))))))
-
-(defun org-tickets--async-create-link (from-key to-key link-type callback)
-  "Asynchronously create a link between two tickets.
-FROM-KEY blocks TO-KEY via LINK-TYPE (typically \"Blocks\").
-CALLBACK is (lambda (response err) ...) called on completion.
-Goes through the rate-limit state machine via `org-tickets--async-request'."
-  (org-tickets--async-request
-   "POST" "/rest/api/3/issueLink"
-   callback
-   (list (cons 'type (list (cons "name" link-type)))
-         (cons "inwardIssue" (list (cons "key" from-key)))
-         (cons "outwardIssue" (list (cons "key" to-key))))))
 
 (defvar org-tickets--sprint-cache nil
   "Cache of sprints for the current project: ((\"name\" . ID) ...).")

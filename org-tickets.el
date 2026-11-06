@@ -52,9 +52,11 @@
 (require 'org-tickets-attachments)
 (require 'org-tickets-parse)
 (require 'org-tickets-adf-import)
+(require 'org-tickets-import)
+(require 'org-tickets-links)
+(require 'org-tickets-inherit)
 (require 'org-tickets-sync-phases)
 (require 'org-tickets-sync)
-(require 'org-tickets-import)
 (require 'org-tickets-cmd)
 
 (provide 'org-tickets)

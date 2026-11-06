@@ -94,7 +94,7 @@ All side-effectful helpers (attachments, links, config) are stubbed out."
                                (org-tickets--async-download-attachments
                                 (lambda (_key _atts callback) (funcall callback nil nil)))
                                (org-tickets--async-sync-ticket-links
-                                (lambda (_ticket _buf callback) (funcall callback)))
+                                (lambda (_ticket callback) (funcall callback)))
                                (org-tickets--build-adf-description
                                 (lambda (_desc _atts) nil))
                                (force-mode-line-update #'ignore)

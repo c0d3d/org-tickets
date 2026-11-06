@@ -118,9 +118,8 @@ BLOCKS: PROJ-200), sync should still create a Blocks link from PROJ-100 to PROJ-
 ")
         (org-mode)
         (let* ((doc (org-tickets--parse-document))
-               (story (car (org-tickets--doc-children doc)))
-               (org-buf (current-buffer)))
-          (org-tickets--async-sync-ticket-links story org-buf
+               (story (car (org-tickets--doc-children doc))))
+          (org-tickets--async-sync-ticket-links story
                                              (lambda () (setq callback-called t)))
           ;; Should create a "Blocks" link from PROJ-100 (blocker) to PROJ-200 (blocked)
           (should callback-called)
@@ -259,9 +258,8 @@ PROJ-500 is not in the buffer, but the Story should still fire a link to it."
 ")
         (org-mode)
         (let* ((doc (org-tickets--parse-document))
-               (story (car (org-tickets--doc-children doc)))
-               (org-buf (current-buffer)))
-          (org-tickets--async-sync-ticket-links story org-buf
+               (story (car (org-tickets--doc-children doc))))
+          (org-tickets--async-sync-ticket-links story
                                              (lambda () (setq callback-called t)))
           (should callback-called)
           ;; Should create a "Blocks" link from PROJ-200 to PROJ-500
@@ -336,7 +334,7 @@ tickets get their links on the FIRST sync (they were silently skipped)."
                                      (push (list from to type) links)
                                      (funcall callback nil nil))))
         (let ((done nil))
-          (org-tickets--async-sync-ticket-links story (current-buffer)
+          (org-tickets--async-sync-ticket-links story
                                              (lambda () (setq done t)))
           (should done)))
       (should (member '("P-2" "P-1" "Blocks") links)))))
@@ -353,7 +351,7 @@ tickets get their links on the FIRST sync (they were silently skipped)."
                                    (lambda (_f _t _type callback) (funcall callback nil "403 Forbidden")))
                                   (message
                                    (lambda (fmt &rest args) (push (apply #'format fmt args) logged))))
-        (org-tickets--async-sync-ticket-links story (current-buffer) #'ignore))
+        (org-tickets--async-sync-ticket-links story #'ignore))
       (should (seq-some (lambda (m) (string-match-p "403 Forbidden" m)) logged)))))
 
 (provide 'org-tickets-test-sync-links)

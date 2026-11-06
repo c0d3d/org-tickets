@@ -340,7 +340,7 @@ in Jira -- while `org-tickets-insert-story-template' documented otherwise."
                                    (lambda (from to type callback)
                                      (push (list from to type) links)
                                      (funcall callback nil nil))))
-        (org-tickets--async-sync-ticket-links task (current-buffer) #'ignore))
+        (org-tickets--async-sync-ticket-links task #'ignore))
       (should (member '("P-2" "P-1" "Blocks") links)))))
 
 (ert-deftest org-tickets-test--task-is-created-when-a-feature-lacks-a-key ()
@@ -396,7 +396,7 @@ created in Jira, yet the sync reported success."
                                    (lambda (from to type callback)
                                      (push (list from to type) links)
                                      (funcall callback nil nil))))
-        (org-tickets--async-sync-ticket-links merge (current-buffer) #'ignore))
+        (org-tickets--async-sync-ticket-links merge #'ignore))
       (should (member '("P-2" "P-1" "Blocks") links)))))
 
 (ert-deftest org-tickets-test--merge-inherits-parent-properties ()

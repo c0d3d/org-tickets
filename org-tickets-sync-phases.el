@@ -33,39 +33,10 @@
 (require 'org-tickets-convert)
 (require 'org-tickets-attachments)
 (require 'org-tickets-fields)
-
-(declare-function org-tickets--set-org-ticket-key "org-tickets-sync")
-(declare-function org-tickets--set-org-sprint "org-tickets-sync")
-(declare-function org-tickets--set-org-due-date "org-tickets-sync")
-(declare-function org-tickets--inherit-due-date "org-tickets-sync")
-(defvar org-tickets--remote-parent-cache)
-(declare-function org-tickets--ticket-buffer-key "org-tickets-sync")
-(declare-function org-tickets--async-sync-ticket-links "org-tickets-sync")
-(declare-function org-tickets--sync-cleanup "org-tickets-sync")
+(require 'org-tickets-links)
+(require 'org-tickets-inherit)
 
 ;;;; Async Sync Helpers
-
-(defmacro org-tickets--at-ticket-marker (ticket &rest body)
-  "Run BODY at TICKET's heading marker, inside `save-excursion'.
-BODY runs in the marker's buffer.  Returns nil without running BODY when
-the ticket has no marker, or the marker is unset or its buffer killed."
-  (declare (indent 1) (debug (form body)))
-  (let ((m (make-symbol "marker")))
-    `(let ((,m (org-tickets--ticket-marker ,ticket)))
-       (when (and (markerp ,m) (marker-position ,m)
-                  (buffer-live-p (marker-buffer ,m)))
-         (with-current-buffer (marker-buffer ,m)
-           (save-excursion
-             (goto-char ,m)
-             ,@body))))))
-
-(defun org-tickets--ticket-parent-key (ticket)
-  "Return the key of TICKET's parent, or nil.
-That is TICKET's explicit PARENT property, else the key of the nearest
-outline ancestor ticket found from its heading marker."
-  (or (org-tickets--ticket-parent ticket)
-      (org-tickets--at-ticket-marker ticket
-        (org-tickets--find-parent-ticket-key))))
 
 (defun org-tickets--all-features-exist-p (doc)
   "Return non-nil if every feature in DOC has a non-empty JIRA_KEY."
@@ -107,6 +78,48 @@ returns nil) when BUFFER has been killed."
 (defun org-tickets--extract-due-date-from-response (response)
   "Extract due date from a GET issue RESPONSE."
   (org-tickets--response-field response "duedate"))
+
+;;;; Sync Setup and Teardown
+
+(defun org-tickets--sync-save-point ()
+  "Record point and window scroll of the current buffer for later restore.
+Uses markers so the saved location rides along as sync inserts text."
+  (setq org-tickets--sync-saved-point (point-marker))
+  (let ((win (get-buffer-window (current-buffer))))
+    (setq org-tickets--sync-saved-window-start
+          (and win (copy-marker (window-start win))))))
+
+(defun org-tickets--sync-restore-point ()
+  "Restore point and window scroll saved by `org-tickets--sync-save-point'.
+Runs in the saved point's buffer.  Restores point, and if that buffer is
+displayed in a window, restores its scroll without stealing focus.
+Degrades gracefully if nothing was saved or the buffer was killed.
+Always releases the saved markers."
+  (let ((point-marker org-tickets--sync-saved-point)
+        (start-marker org-tickets--sync-saved-window-start))
+    (when (and (markerp point-marker) (buffer-live-p (marker-buffer point-marker)))
+      (with-current-buffer (marker-buffer point-marker)
+        (goto-char point-marker)
+        (let ((win (get-buffer-window (current-buffer))))
+          (when win
+            (when (and (markerp start-marker) (marker-position start-marker))
+              (set-window-start win start-marker))
+            (set-window-point win (point))))))
+    (when (markerp point-marker) (set-marker point-marker nil))
+    (when (markerp start-marker) (set-marker start-marker nil))
+    (setq org-tickets--sync-saved-point nil)
+    (setq org-tickets--sync-saved-window-start nil)))
+
+(defun org-tickets--sync-cleanup ()
+  "Clear sync-in-progress flag, unlock buffer, and remove progress indicator.
+Restores `buffer-read-only' to what it was before sync locked it, rather
+than always unlocking a buffer the user had deliberately made read-only.
+Also restores point and window scroll to where they were when sync began."
+  (setq buffer-read-only org-tickets--sync-prior-read-only)
+  (setq org-tickets--sync-prior-read-only nil)
+  (setq org-tickets--sync-in-progress nil)
+  (org-tickets--progress-clear)
+  (org-tickets--sync-restore-point))
 
 ;;;; Phase 1: Create/Update Tickets
 
@@ -320,13 +333,11 @@ the pipeline hung)."
              (org-tickets--attachment-upload-step
               key attachments org-buffer description done))))))))
 
-(defun org-tickets--make-link-thunk (ticket org-buffer)
-  "Create a thunk that asynchronously syncs issue links for TICKET.
-ORG-BUFFER is the source buffer."
+(defun org-tickets--make-link-thunk (ticket)
+  "Create a thunk that asynchronously syncs issue links for TICKET."
   (lambda (done)
     (org-tickets--async-sync-ticket-links
-     ticket org-buffer
-     (lambda () (funcall done nil nil)))))
+     ticket (lambda () (funcall done nil nil)))))
 
 (defun org-tickets--sync-phase-2 (doc phase-1-results org-buffer)
   "Phase 2: sync attachments and issue links concurrently.
@@ -366,10 +377,52 @@ are matched by key against DOC's tickets."
                 thunks))))
     ;; Link thunks for all tickets
     (dolist (ticket (org-tickets--doc-tickets doc))
-      (push (org-tickets--make-link-thunk ticket org-buffer) thunks))
+      (push (org-tickets--make-link-thunk ticket) thunks))
     (nreverse thunks)))
 
 ;;;; Phase 3: Apply Results to Buffer
+
+(defun org-tickets--set-org-sprint (ticket-key sprint)
+  "Set SPRINT property in org for TICKET-KEY."
+  (org-tickets--with-ticket-at-key ticket-key
+    (org-entry-put (point) "SPRINT" sprint)))
+
+(defun org-tickets--set-org-due-date (ticket-key due-date)
+  "Set the DUE_DATE property in org for TICKET-KEY to DUE-DATE."
+  (org-tickets--with-ticket-at-key ticket-key
+    (org-entry-put (point) "DUE_DATE" due-date)))
+
+(defun org-tickets--set-org-ticket-key (ticket key)
+  "Write KEY as JIRA_KEY on TICKET's heading, located via its marker.
+Markers survive the buffer edits earlier sync steps make, unlike the
+buffer positions captured at parse time."
+  (org-tickets--at-ticket-marker ticket
+    (org-entry-put (point) "JIRA_KEY" key)))
+
+(defun org-tickets--ensure-blocks-entry (blocker-key key)
+  "Add KEY to the BLOCKS property of ticket BLOCKER-KEY unless already listed.
+Keys are compared exactly, not as substrings.  Point is preserved."
+  (org-tickets--with-ticket-at-key blocker-key
+    (let ((current (org-tickets--csv-property "BLOCKS")))
+      (unless (member key current)
+        (org-tickets--append-csv-property "BLOCKS" key)))))
+
+(defun org-tickets--ticket-blockers (ticket)
+  "Return the BLOCKED-BY keys of TICKET whose BLOCKS need updating.
+Nil when TICKET has no key; empty keys and TICKET's own key are dropped."
+  (let ((key (org-tickets--ticket-key ticket)))
+    (and (org-tickets--non-empty-string key)
+         (seq-remove (lambda (b) (or (string-empty-p b) (string= b key)))
+                     (org-tickets--ticket-blocked-by ticket)))))
+
+(defun org-tickets--resolve-blocked-by-in-org (doc)
+  "Update org buffer BLOCKS properties from BLOCKED-BY relationships in DOC.
+For each ticket with a BLOCKED-BY property, ensure the referenced ticket's
+BLOCKS property includes the current ticket's key."
+  (dolist (ticket (org-tickets--doc-tickets doc))
+    (dolist (blocker (org-tickets--ticket-blockers ticket))
+      (org-tickets--ensure-blocks-entry
+       blocker (org-tickets--ticket-key ticket)))))
 
 (defun org-tickets--apply-new-keys (phase-1-results)
   "Write new JIRA_KEYs onto the headings of newly created tickets.
@@ -410,7 +463,7 @@ DUE_DATE phase 1 fetched from Jira.  Children created during the run are
 looked up by the key the buffer just received: their struct was parsed
 before the key existed and still holds nil.  A parent absent from the
 buffer is fetched from Jira at most once."
-  (let ((org-tickets--remote-parent-cache (make-hash-table :test #'equal)))
+  (org-tickets--with-parent-cache
     (dolist (child (org-tickets--doc-children doc))
       (let* ((child-key (or (org-tickets--ticket-key child)
                             (org-tickets--ticket-buffer-key child)))

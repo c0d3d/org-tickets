@@ -13,10 +13,12 @@ The package is split into logical modules for maintainability.
 | `org-tickets-convert.el` | Org-to-ADF conversion, ADF node constructors |
 | `org-tickets-fields.el` | Jira payload construction (`org-tickets--ticket-fields`), create/update field rules, clearing semantics |
 | `org-tickets-parse.el` | Parse org buffers into ticket structs, document and ticket extraction |
-| `org-tickets-sync.el` | Sync entry point, story creation, block links, fix version/label management |
-| `org-tickets-sync-phases.el` | Async sync pipeline: phase 1 (create/update), phase 2 (attachments+links), phase 3 (apply results) |
-| `org-tickets-import.el` | Import from Jira, ADF parsing (Jira to org) |
 | `org-tickets-adf-import.el` | ADF-to-org conversion (inline/block/list layers) used by import |
+| `org-tickets-import.el` | Import from Jira, ADF parsing (Jira to org) |
+| `org-tickets-links.el` | "Blocks" link creation (`--async-create-link`, per-ticket link thunks), ticket-marker helpers (`--at-ticket-marker`, `--ticket-buffer-key`, `--ticket-parent-key`) |
+| `org-tickets-inherit.el` | DUE_DATE/FIX_VERSION inheritance from the PARENT or ancestor ticket, remote parent cache (`--with-parent-cache`) |
+| `org-tickets-sync-phases.el` | Async sync pipeline: setup/teardown (`--sync-cleanup`), phase 1 (create/update), phase 2 (attachments+links), phase 3 (apply results: `--set-org-*`, `--resolve-blocked-by-in-org`) |
+| `org-tickets-sync.el` | Sync entry point, story creation, block links, fix version/label/story sizing commands |
 | `org-tickets-cmd.el` | Interactive commands, templates |
 
 ## Data Structures
@@ -45,6 +47,17 @@ order:
 ```
 org-tickets.el → org-tickets-core.el → [all other modules] → org-tickets-cmd.el
 ```
+
+Each module `require`s only modules below it; there are no require cycles
+(`deps.mk`, generated from the `require` lines, orders compilation).  The
+sync stack layers as:
+
+```
+links, inherit → sync-phases → sync → cmd
+```
+
+`sync-phases` never calls back into `sync`; shared helpers live in the
+lower module that both use.
 
 To pick up source edits in a running Emacs, restart it (or `M-x load-file` the
 edited module).

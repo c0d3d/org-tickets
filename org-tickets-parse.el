@@ -214,31 +214,6 @@ child headings are included."
       (org-tickets--non-empty-string
        (string-trim (buffer-substring-no-properties (car region) (cdr region)))))))
 
-(defun org-tickets--ensure-blocks-entry (blocker-key key)
-  "Add KEY to the BLOCKS property of ticket BLOCKER-KEY unless already listed.
-Keys are compared exactly, not as substrings.  Point is preserved."
-  (org-tickets--with-ticket-at-key blocker-key
-    (let ((current (org-tickets--csv-property "BLOCKS")))
-      (unless (member key current)
-        (org-tickets--append-csv-property "BLOCKS" key)))))
-
-(defun org-tickets--ticket-blockers (ticket)
-  "Return the BLOCKED-BY keys of TICKET whose BLOCKS need updating.
-Nil when TICKET has no key; empty keys and TICKET's own key are dropped."
-  (let ((key (org-tickets--ticket-key ticket)))
-    (and (org-tickets--non-empty-string key)
-         (seq-remove (lambda (b) (or (string-empty-p b) (string= b key)))
-                     (org-tickets--ticket-blocked-by ticket)))))
-
-(defun org-tickets--resolve-blocked-by-in-org (doc)
-  "Update org buffer BLOCKS properties from BLOCKED-BY relationships in DOC.
-For each ticket with a BLOCKED-BY property, ensure the referenced ticket's
-BLOCKS property includes the current ticket's key."
-  (dolist (ticket (org-tickets--doc-tickets doc))
-    (dolist (blocker (org-tickets--ticket-blockers ticket))
-      (org-tickets--ensure-blocks-entry
-       blocker (org-tickets--ticket-key ticket)))))
-
 (defun org-tickets--find-parent-ticket-key ()
   "Return the JIRA_KEY of the nearest ancestor Feature/Improvement.
 Climbs the outline from the heading at point; skips ancestors that are

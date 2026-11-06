@@ -506,7 +506,7 @@ last ticket processed would otherwise leave point far from the user's location."
                                    (push key upload-calls)
                                    (funcall callback nil nil)))
                                 (org-tickets--async-sync-ticket-links
-                                 (lambda (ticket org-buffer callback)
+                                 (lambda (ticket callback)
                                    (push (org-tickets--ticket-key ticket) link-calls)
                                    (funcall callback)))
                                 (org-tickets--safe-with-buffer
@@ -590,8 +590,7 @@ leave the pipeline hung with the buffer stuck read-only."
                (story (car (org-tickets--doc-children doc)))
                (result nil))
           (org-tickets--async-sync-ticket-links
-           story (current-buffer)
-           (lambda () (setq result t)))
+           story (lambda () (setq result t)))
           (should result)
           ;; Should have: parent link + blocks link = 2 calls
           (should (= (length link-calls) 2))
@@ -628,7 +627,7 @@ leave the pipeline hung with the buffer stuck read-only."
                                   (org-tickets--async-upload-attachments
                                    (lambda (_key _atts callback) (funcall callback nil nil)))
                                   (org-tickets--async-sync-ticket-links
-                                   (lambda (_ticket _buf callback) (funcall callback))))
+                                   (lambda (_ticket callback) (funcall callback))))
         (with-temp-buffer
           (org-mode)
           (org-tickets-test--insert-feature "Feature" "PROJ-100")
