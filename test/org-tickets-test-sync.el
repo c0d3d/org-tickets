@@ -7,8 +7,6 @@
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-;;;; JSON responses
-
 ;;;; Tests for Org Property Helpers
 
 (ert-deftest org-tickets-test--set-org-fix-version ()

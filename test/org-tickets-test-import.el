@@ -20,8 +20,6 @@
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-;;;; ensure-list
-
 ;;;; Pull Remote / Update Heading Tests
 
 (ert-deftest org-tickets-test--update-org-heading-from-ticket-updates-properties ()

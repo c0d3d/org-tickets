@@ -12,57 +12,57 @@
 (require 'org-tickets-test-fixtures)
 
 (ert-deftest org-tickets-test--roundtrip-paragraphs ()
-  "Check: roundtrip paragraphs."
+  "Two paragraphs survive push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "one\n\ntwo") "one\n\ntwo")))
 
 (ert-deftest org-tickets-test--roundtrip-multiline-paragraph ()
-  "Check: roundtrip multiline paragraph."
+  "A paragraph with a soft line break survives push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "line1\nline2") "line1\nline2")))
 
 (ert-deftest org-tickets-test--roundtrip-sub-superscript ()
-  "Check: roundtrip sub superscript."
+  "Braced subscripts and superscripts survive push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "H_{2}O and x^{2}")
                  "H_{2}O and x^{2}")))
 
 (ert-deftest org-tickets-test--roundtrip-unbraced-underscore-literal ()
-  "Check: roundtrip unbraced underscore literal."
+  "An unbraced underscore stays literal through push then pull."
   (should (equal (org-tickets-test--roundtrip "release/26_02 works")
                  "release/26_02 works")))
 
 (ert-deftest org-tickets-test--roundtrip-bullet-list ()
-  "Check: roundtrip bullet list."
+  "A bullet list survives push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "- alpha\n- beta")
                  "- alpha\n- beta")))
 
 (ert-deftest org-tickets-test--roundtrip-nested-bullet-list ()
-  "Check: roundtrip nested bullet list."
+  "A nested bullet list survives push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "- first\n  - nested")
                  "- first\n  - nested")))
 
 (ert-deftest org-tickets-test--roundtrip-ordered-list ()
-  "Check: roundtrip ordered list."
+  "An ordered list survives push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "1. one\n2. two")
                  "1. one\n2. two")))
 
 (ert-deftest org-tickets-test--roundtrip-code-block ()
-  "Check: roundtrip code block."
+  "A src block with a language survives push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip
                   "#+BEGIN_SRC python\nx = 1\n#+END_SRC")
                  "#+BEGIN_SRC python\nx = 1\n#+END_SRC")))
 
 (ert-deftest org-tickets-test--roundtrip-quote-block ()
-  "Check: roundtrip quote block."
+  "A quote block survives push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip
                   "#+BEGIN_QUOTE\nquoted text\n#+END_QUOTE")
                  "#+BEGIN_QUOTE\nquoted text\n#+END_QUOTE")))
 
 (ert-deftest org-tickets-test--roundtrip-horizontal-rule ()
-  "Check: roundtrip horizontal rule."
+  "A horizontal rule between paragraphs survives push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "before\n\n-----\n\nafter")
                  "before\n\n-----\n\nafter")))
 
 (ert-deftest org-tickets-test--roundtrip-inline-marks ()
-  "Check: roundtrip inline marks."
+  "Bold, italic and code marks survive push then pull unchanged."
   (should (equal (org-tickets-test--roundtrip "*bold* and /italic/ and ~code~")
                  "*bold* and /italic/ and ~code~")))
 

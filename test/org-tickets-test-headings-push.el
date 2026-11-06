@@ -288,19 +288,19 @@ its description headings could not nest inside it."
                    '((1 . "Plan") ("paragraph" . "P."))))))
 
 (ert-deftest org-tickets-test--headings-feature-with-child-story ()
-  "Check: headings feature with child story."
+  "A Feature's description ends at its child Story; the Story keeps its own headings."
   (org-tickets-test--assert-parent-type-headings "Feature"))
 
 (ert-deftest org-tickets-test--headings-new-feature-with-child-story ()
-  "Check: headings new feature with child story."
+  "A New Feature's description ends at its child Story; the Story keeps its own headings."
   (org-tickets-test--assert-parent-type-headings "New Feature"))
 
 (ert-deftest org-tickets-test--headings-improvement-with-child-story ()
-  "Check: headings improvement with child story."
+  "An Improvement's description ends at its child Story; the Story keeps its own headings."
   (org-tickets-test--assert-parent-type-headings "Improvement"))
 
 (ert-deftest org-tickets-test--headings-epic-with-child-story ()
-  "Check: headings epic with child story."
+  "An Epic's description ends at its child Story; the Story keeps its own headings."
   (org-tickets-test--assert-parent-type-headings "Epic"))
 
 (ert-deftest org-tickets-test--headings-parent-heading-directly-before-shallower-child ()

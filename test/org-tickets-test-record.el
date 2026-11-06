@@ -357,7 +357,6 @@ Guards against a slot being dropped or its accessor index drifting."
     (should (null (assoc "key" api-response)))
     (should (string= (org-tickets--alist-get "key" api-response) "PROJ-123"))))
 
-
 (ert-deftest org-tickets-test--ensure-list-normalizes-shapes ()
   "Vectors become lists, lists pass through, nil stays nil, atoms are wrapped."
   (should (equal (org-tickets--ensure-list [1 2 3]) '(1 2 3)))

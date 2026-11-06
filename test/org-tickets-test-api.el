@@ -344,7 +344,6 @@ sprint functions previously used string keys with assoc, silently failing."
                   '((summary . "S") (customfield_10020 . 1)) 3453)
                  '((summary . "S") (customfield_10020 . 3453)))))
 
-
 (ert-deftest org-tickets-test--get-attachments-response-parsing ()
   "Test that attachment ID can be extracted from issue endpoint response."
   (let* ((issue-response (org-tickets-test--json "{\"expand\": \"names,schema\", \"key\": \"PROJ-12752\", \"id\": \"108903\", \"self\": \"https://your-domain.atlassian.net/rest/api/3/issue/108903\", \

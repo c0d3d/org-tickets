@@ -30,7 +30,7 @@ ORDER is the \"order\" attribute, or nil when absent."
 ;;;; Push
 
 (ert-deftest org-tickets-test--ordered-start-from-bullet ()
-  "Check: ordered start from bullet."
+  "A list starting at \"4.\" pushes as an orderedList with order 4."
   (should (equal (org-tickets-test--list-orders "4. a\n5. b")
                  '(("orderedList" . 4)))))
 
@@ -41,17 +41,17 @@ ORDER is the \"order\" attribute, or nil when absent."
     (should-not (assoc "attrs" list-node))))
 
 (ert-deftest org-tickets-test--ordered-start-paren-bullet ()
-  "Check: ordered start paren bullet."
+  "A list starting at \"3)\" pushes as an orderedList with order 3."
   (should (equal (org-tickets-test--list-orders "3) a\n4) b")
                  '(("orderedList" . 3)))))
 
 (ert-deftest org-tickets-test--ordered-start-zero ()
-  "Check: ordered start zero."
+  "A list starting at \"0.\" pushes with order 0."
   (should (equal (org-tickets-test--list-orders "0. a\n1. b")
                  '(("orderedList" . 0)))))
 
 (ert-deftest org-tickets-test--ordered-start-multi-digit ()
-  "Check: ordered start multi digit."
+  "A list starting at \"100.\" pushes with order 100."
   (should (equal (org-tickets-test--list-orders "100. a\n101. b")
                  '(("orderedList" . 100)))))
 
@@ -61,7 +61,7 @@ ORDER is the \"order\" attribute, or nil when absent."
                  '(("orderedList" . 7)))))
 
 (ert-deftest org-tickets-test--ordered-start-counter-beats-bullet ()
-  "Check: ordered start counter beats bullet."
+  "A [@9] counter on the first item overrides its \"4.\" bullet."
   (should (equal (org-tickets-test--list-orders "4. [@9] a")
                  '(("orderedList" . 9)))))
 
@@ -75,7 +75,7 @@ ORDER is the \"order\" attribute, or nil when absent."
                  '(("orderedList" . 2)))))
 
 (ert-deftest org-tickets-test--ordered-start-bullet-list-has-no-order ()
-  "Check: ordered start bullet list has no order."
+  "A bullet list is a bulletList with no order."
   (should (equal (org-tickets-test--list-orders "- a\n- b")
                  '(("bulletList")))))
 
@@ -86,12 +86,12 @@ ORDER is the \"order\" attribute, or nil when absent."
                    '(("orderedList"))))))
 
 (ert-deftest org-tickets-test--ordered-start-nested-in-bullet ()
-  "Check: ordered start nested in bullet."
+  "An ordered list nested in a bullet list keeps its own start number."
   (should (equal (org-tickets-test--list-orders "- outer\n  3. in\n  4. in2")
                  '(("bulletList") ("orderedList" . 3)))))
 
 (ert-deftest org-tickets-test--ordered-start-nested-in-ordered ()
-  "Check: ordered start nested in ordered."
+  "Nested ordered lists each keep their own start number."
   (should (equal (org-tickets-test--list-orders "4. outer\n   7. in\n   8. in2")
                  '(("orderedList" . 4) ("orderedList" . 7)))))
 
@@ -102,14 +102,14 @@ ORDER is the \"order\" attribute, or nil when absent."
                  '(("orderedList" . 4)))))
 
 (ert-deftest org-tickets-test--ordered-start-under-description-heading ()
-  "Check: ordered start under description heading."
+  "An ordered list under a description heading keeps its start number."
   (should (equal (org-tickets-test--list-orders "*** Steps\n5. a\n6. b")
                  '(("orderedList" . 5)))))
 
 ;;;; Pull
 
 (ert-deftest org-tickets-test--ordered-start-pull-order ()
-  "Check: ordered start pull order."
+  "An orderedList with order 4 imports as a list numbered from 4."
   (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"orderedList\",\"attrs\":{\"order\":4},
                     \"content\":[
@@ -118,14 +118,14 @@ ORDER is the \"order\" attribute, or nil when absent."
                  "4. a\n5. b")))
 
 (ert-deftest org-tickets-test--ordered-start-pull-no-attrs-is-one ()
-  "Check: ordered start pull no attrs is one."
+  "An orderedList without attrs imports numbered from 1."
   (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"orderedList\",\"content\":[
                      {\"type\":\"listItem\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}]}]}]}")
                  "1. a")))
 
 (ert-deftest org-tickets-test--ordered-start-pull-zero ()
-  "Check: ordered start pull zero."
+  "An orderedList with order 0 imports numbered from 0."
   (should (equal (org-tickets-test--pull
                   "{\"type\":\"doc\",\"content\":[{\"type\":\"orderedList\",\"attrs\":{\"order\":0},\"content\":[
                      {\"type\":\"listItem\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}]}]}]}")
@@ -160,7 +160,7 @@ ORDER is the \"order\" attribute, or nil when absent."
     (should (equal (org-tickets-test--roundtrip-n text 3) text))))
 
 (ert-deftest org-tickets-test--ordered-start-roundtrip-reported-item ()
-  "Check: ordered start roundtrip reported item."
+  "The reported item starting at 4 survives three push/pull cycles."
   (let ((text (concat "4" (substring org-tickets-test--reported-item 1))))
     (should (equal (org-tickets-test--roundtrip-n text 3) text))))
 

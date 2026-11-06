@@ -25,7 +25,7 @@
                    "That signature should be done with ECDSA using SHA-384 and a Nist P-384 key."))))
 
 (ert-deftest org-tickets-test--continuation-bullet-item ()
-  "Check: continuation bullet item."
+  "A bullet item's second line pushes as a line break then text, without its indent."
   (should (equal (org-tickets-test--inline-summary "- a\n  b")
                  '("a" br "b"))))
 
@@ -45,7 +45,7 @@
                    '("a" br "b")))))
 
 (ert-deftest org-tickets-test--continuation-several-lines ()
-  "Check: continuation several lines."
+  "Every continuation line of a bullet item pushes without its indent."
   (should (equal (org-tickets-test--inline-summary "- a\n  b\n  c\n  d")
                  '("a" br "b" br "c" br "d"))))
 
@@ -66,7 +66,7 @@
                  '("a" br "code" " " "after"))))
 
 (ert-deftest org-tickets-test--continuation-tab-indent ()
-  "Check: continuation tab indent."
+  "A tab-indented continuation line pushes without the tab."
   (should (equal (org-tickets-test--inline-summary "- a\n\tb")
                  '("a" br "b"))))
 
@@ -94,7 +94,7 @@
     (cdr (assoc "content" item))))
 
 (ert-deftest org-tickets-test--list-item-content-after-nested-list-keeps-order ()
-  "Check: list item content after nested list keeps order."
+  "A paragraph after a nested list stays after it as the item's third block."
   (let ((blocks (org-tickets-test--first-item-blocks
                  "- a\n  - nested\n\n  after nested\n- b")))
     (should (equal (mapcar (lambda (b) (cdr (assoc "type" b))) blocks)
@@ -103,13 +103,13 @@
                    "after nested"))))
 
 (ert-deftest org-tickets-test--list-item-second-paragraph-not-indented ()
-  "Check: list item second paragraph not indented."
+  "A list item's second paragraph pushes as plain text without its indent."
   (let ((blocks (org-tickets-test--first-item-blocks "- a\n\n  second para")))
     (should (equal (org-tickets-test--block-text (cadr blocks))
                    "second para"))))
 
 (ert-deftest org-tickets-test--list-item-blocks-roundtrip-fixpoint ()
-  "Check: list item blocks roundtrip fixpoint."
+  "Multi-block list items survive three push/pull cycles unchanged."
   (dolist (text '("- a\n\n  second para"
                   "- a\n  - nested\n\n  after nested\n- b"))
     (should (equal (org-tickets-test--roundtrip-n text 3) text))))
@@ -129,7 +129,7 @@
 ;;;; Round trips are fixpoints
 
 (ert-deftest org-tickets-test--continuation-roundtrip-reported-item ()
-  "Check: continuation roundtrip reported item."
+  "The reported ordered item survives a push/pull cycle unchanged."
   (should (equal (org-tickets-test--roundtrip org-tickets-test--reported-item)
                  org-tickets-test--reported-item)))
 

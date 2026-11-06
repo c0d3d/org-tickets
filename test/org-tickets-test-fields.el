@@ -40,7 +40,7 @@
   (cdr (assq (intern name) fields)))
 
 (ert-deftest org-tickets-test--ticket-fields-update-basic ()
-  "Check: ticket fields update basic."
+  "An update payload carries every ticket field but none of the create-only ones."
   (let* ((ticket (org-tickets--ticket-create
                   :key "P-1" :type "Story" :summary "S"
                   :description "body" :fix-version "Aug2026"
@@ -71,7 +71,7 @@ relationship.  Guards against reintroducing the parent push."
     (should-not (org-tickets-test--fields-get fields "parent"))))
 
 (ert-deftest org-tickets-test--ticket-fields-feature-maps-to-new-feature ()
-  "Check: ticket fields feature maps to new feature."
+  "A Feature ticket is created with the \"New Feature\" issue type id."
   (let* ((org-tickets-project-id "12345")
          (org-tickets--issue-type-ids '(("New Feature" . "2")))
          (fields (org-tickets--ticket-fields
@@ -80,7 +80,7 @@ relationship.  Guards against reintroducing the parent push."
     (should (equal (org-tickets-test--fields-get fields "issuetype") '(("id" . "2"))))))
 
 (ert-deftest org-tickets-test--ticket-fields-unknown-type-errors-clearly ()
-  "Check: ticket fields unknown type errors clearly."
+  "Creating a ticket whose type has no known issue type id signals an error."
   (let ((org-tickets-project-id "12345")
         (org-tickets--issue-type-ids '(("Story" . "1"))))
     (should-error (org-tickets--ticket-fields
@@ -103,7 +103,7 @@ relationship.  Guards against reintroducing the parent push."
       (should (string-match-p "\"customfield_10016\":null" (json-encode fields))))))
 
 (ert-deftest org-tickets-test--parse-populates-clear-flags ()
-  "Check: parse populates clear flags."
+  "An empty LABELS and a zero STORY_POINTS parse as requests to clear those fields."
   (with-temp-buffer
     (org-mode)
     (insert "* T\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-1\n"

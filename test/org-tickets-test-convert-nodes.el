@@ -198,7 +198,7 @@ backtick styling over the trailing space."
                  '((("type" . "text") ("text" . "x"))))))
 
 (ert-deftest org-tickets-test--adf-node-shape ()
-  "Check: adf node shape."
+  "An ADF node is just its type, plus attrs and content only when given."
   (should (equal (org-tickets--adf-node "rule") '(("type" . "rule"))))
   (should (equal (org-tickets--adf-node "codeBlock"
                                      (list (cons "language" "el"))
@@ -208,7 +208,7 @@ backtick styling over the trailing space."
                    ("content" . ((("type" . "text") ("text" . "x"))))))))
 
 (ert-deftest org-tickets-test--adf-add-mark-layers-marks ()
-  "Check: adf add mark layers marks."
+  "Adding a mark layers it on text nodes' existing marks and leaves hardBreaks alone."
   (let ((nodes (append (org-tickets--adf-text-node "a" "strong")
                        (list '(("type" . "hardBreak")))
                        (org-tickets--adf-text-node "b"))))
