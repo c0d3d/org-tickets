@@ -45,6 +45,28 @@
 
 ;;;; Async Sync Helpers
 
+(defmacro org-tickets--at-ticket-marker (ticket &rest body)
+  "Run BODY at TICKET's heading marker, inside `save-excursion'.
+BODY runs in the marker's buffer.  Returns nil without running BODY when
+the ticket has no marker, or the marker is unset or its buffer killed."
+  (declare (indent 1) (debug (form body)))
+  (let ((m (make-symbol "marker")))
+    `(let ((,m (org-tickets--ticket-marker ,ticket)))
+       (when (and (markerp ,m) (marker-position ,m)
+                  (buffer-live-p (marker-buffer ,m)))
+         (with-current-buffer (marker-buffer ,m)
+           (save-excursion
+             (goto-char ,m)
+             ,@body))))))
+
+(defun org-tickets--ticket-parent-key (ticket)
+  "Return the key of TICKET's parent, or nil.
+That is TICKET's explicit PARENT property, else the key of the nearest
+outline ancestor ticket found from its heading marker."
+  (or (org-tickets--ticket-parent ticket)
+      (org-tickets--at-ticket-marker ticket
+        (org-tickets--find-parent-ticket-key))))
+
 (defun org-tickets--all-features-exist-p (doc)
   "Return non-nil if every feature in DOC has a non-empty JIRA_KEY."
   (seq-every-p (lambda (f)
@@ -95,21 +117,19 @@ returns nil) when BUFFER has been killed."
   "Fire async PUT for TICKET with KEY and call DONE when complete.
 ATTACHMENTS, SPRINT, DUE-DATE are fetched data from the GET.
 ORG-BUFFER is for progress tracking.  DONE is the batch callback."
-  (let ((fields (org-tickets--ticket-fields ticket :attachments attachments)))
+  (let* ((fields (org-tickets--ticket-fields ticket :attachments attachments))
+         (finish (lambda (err)
+                   (org-tickets--safe-with-buffer
+                    org-buffer #'org-tickets--progress-increment)
+                   (funcall done (list :key key :attachments attachments
+                                       :sprint sprint :due-date due-date
+                                       :is-new nil :error err)
+                            nil))))
     (if (null fields)
-        (progn
-          (org-tickets--safe-with-buffer org-buffer #'org-tickets--progress-increment)
-          (funcall done (list :key key :attachments attachments
-                              :sprint sprint :due-date due-date :is-new nil)
-                   nil))
+        (funcall finish nil)
       (org-tickets--async-request
        "PUT" (concat "/rest/api/3/issue/" key)
-       (lambda (_put-response put-err)
-         (org-tickets--safe-with-buffer org-buffer #'org-tickets--progress-increment)
-         (funcall done (list :key key :attachments attachments
-                             :sprint sprint :due-date due-date
-                             :is-new nil :error put-err)
-                  nil))
+       (lambda (_put-response put-err) (funcall finish put-err))
        (list (cons 'fields fields))))))
 
 (defun org-tickets--make-existing-ticket-thunk (ticket org-buffer)
@@ -177,7 +197,7 @@ DOC is the parsed document.  ORG-BUFFER is the originating buffer."
      thunks
      (lambda (results)
        (org-tickets--sync-phase-2
-        doc (org-tickets--collect-phase-1-results results) org-buffer)))))
+        doc (mapcar #'car results) org-buffer)))))
 
 (defun org-tickets--sync-phase-1-sequential (doc org-buffer)
   "Create DOC's features first, apply their new keys, then every other ticket.
@@ -195,7 +215,7 @@ the sync reported success."
     (org-tickets--async-batch
      feature-thunks
      (lambda (feature-results)
-       (let ((feature-plists (org-tickets--collect-phase-1-results feature-results)))
+       (let ((feature-plists (mapcar #'car feature-results)))
          (org-tickets--with-writable-buffer org-buffer
            (org-tickets--apply-new-keys feature-plists))
          (let ((rest-thunks (mapcar (lambda (tk)
@@ -207,13 +227,8 @@ the sync reported success."
               (org-tickets--sync-phase-2
                doc
                (append feature-plists
-                       (org-tickets--collect-phase-1-results rest-results))
+                       (mapcar #'car rest-results))
                org-buffer)))))))))
-
-(defun org-tickets--collect-phase-1-results (results)
-  "Collect phase 1 RESULTS into a list of plists.
-RESULTS is a list of (response . err) cons cells from async-batch."
-  (mapcar #'car results))
 
 ;;;; Phase 2: Attachments + Links
 
@@ -258,6 +273,28 @@ exactly once, on every path."
           (lambda (_put-response _put-err) (funcall callback))
           (list (cons 'fields (list (cons 'description adf))))))))))
 
+(defun org-tickets--attachment-refresh-step (key attachments description done)
+  "Re-PUT KEY's DESCRIPTION when ATTACHMENTS left embeds unresolved, then DONE.
+DONE is called with (nil nil) exactly once."
+  (if (org-tickets--unresolved-attachment-links-p description attachments)
+      (org-tickets--async-refresh-description-embeds
+       key description (lambda () (funcall done nil nil)))
+    (funcall done nil nil)))
+
+(defun org-tickets--attachment-upload-step (key attachments org-buffer description done)
+  "Upload KEY's ATTACHMENTS from ORG-BUFFER, refresh embeds, then call DONE.
+Calls DONE straight away when ORG-BUFFER is dead.  DESCRIPTION is the
+ticket's org description."
+  (if (not (buffer-live-p org-buffer))
+      (funcall done nil nil)
+    (with-current-buffer org-buffer
+      (let ((inhibit-read-only t))
+        (org-tickets--async-upload-attachments
+         key attachments
+         (lambda (_ul-results _ul-err)
+           (org-tickets--attachment-refresh-step
+            key attachments description done)))))))
+
 (defun org-tickets--make-attachment-thunk (key attachments org-buffer &optional description)
   "Create a thunk that asynchronously syncs attachments for KEY.
 ATTACHMENTS is from Phase 1.  ORG-BUFFER is the source buffer.
@@ -281,19 +318,8 @@ the pipeline hung)."
           (org-tickets--async-download-attachments
            key attachments
            (lambda (_dl-results _dl-err)
-             (if (not (buffer-live-p org-buffer))
-                 (funcall done nil nil)
-               (with-current-buffer org-buffer
-                 (let ((inhibit-read-only t))
-                   (org-tickets--async-upload-attachments
-                    key attachments
-                    (lambda (_ul-results _ul-err)
-                      (if (org-tickets--unresolved-attachment-links-p
-                           description attachments)
-                          (org-tickets--async-refresh-description-embeds
-                           key description
-                           (lambda () (funcall done nil nil)))
-                        (funcall done nil nil))))))))))))))
+             (org-tickets--attachment-upload-step
+              key attachments org-buffer description done))))))))
 
 (defun org-tickets--make-link-thunk (ticket org-buffer)
   "Create a thunk that asynchronously syncs issue links for TICKET.
@@ -378,17 +404,6 @@ PHASE-1-RESULTS is the list of result plists from phase 1."
   (org-tickets--apply-plist-updates phase-1-results :due-date
                                  #'org-tickets--set-org-due-date))
 
-(defun org-tickets--apply-default-sprint-to-new (phase-1-results)
-  "Set SPRINT for newly created tickets to default sprint.
-PHASE-1-RESULTS is the list of result plists from phase 1."
-  (dolist (result phase-1-results)
-    (when (and (plist-get result :is-new)
-               (plist-get result :key)
-               org-tickets-default-sprint)
-      (org-tickets--set-org-sprint
-       (plist-get result :key)
-       (format "%s" org-tickets-default-sprint)))))
-
 (defun org-tickets--apply-due-date-inheritance (doc)
   "Inherit due dates from parent features to child tickets in DOC.
 Catches dates that only became known during this run -- a parent whose
@@ -400,12 +415,7 @@ buffer is fetched from Jira at most once."
     (dolist (child (org-tickets--doc-children doc))
       (let* ((child-key (or (org-tickets--ticket-key child)
                             (org-tickets--ticket-buffer-key child)))
-             (parent-key (or (org-tickets--ticket-parent child)
-                             (let ((m (org-tickets--ticket-marker child)))
-                               (when (and (markerp m) (marker-position m))
-                                 (save-excursion
-                                   (goto-char m)
-                                   (org-tickets--find-parent-ticket-key)))))))
+             (parent-key (org-tickets--ticket-parent-key child)))
         (when (and child-key parent-key)
           (org-tickets--inherit-due-date child-key parent-key))))))
 
@@ -438,7 +448,6 @@ ORG-BUFFER is the originating buffer."
        (let ((inhibit-read-only t))
          (org-tickets--apply-sprint-updates phase-1-results)
          (org-tickets--apply-due-date-updates phase-1-results)
-         (org-tickets--apply-default-sprint-to-new phase-1-results)
          (org-tickets--apply-due-date-inheritance doc)
          (org-tickets--resolve-blocked-by-in-org doc))
        (org-tickets--sync-cleanup)

@@ -57,9 +57,8 @@ SPRINT is the Sprint name (defaults to `org-tickets-default-sprint')."
                   labels nil sprint nil (plist-get parent :due-date)))
          (new-key (alist-get 'key result)))
     (org-tickets--insert-story-heading summary feature-key new-key sprint labels)
-    (when blocks-list
-      (dolist (blocked blocks-list)
-        (org-tickets-add-block-link new-key blocked)))
+    (dolist (blocked blocks-list)
+      (org-tickets-add-block-link new-key blocked))
     new-key))
 
 (defun org-tickets--story-parent-values (feature-key)
@@ -83,19 +82,20 @@ Jira.  Signals an error when Jira cannot return the feature either."
   "Insert a Story heading as a child of PARENT-KEY's heading.
 A PARENT-KEY absent from the buffer gets a top-level heading at the end
 of the buffer instead; its PARENT property still names the feature.
-SUMMARY, NEW-KEY, optional SPRINT as before.  LABELS is the label
-list actually sent to Jira, recorded verbatim so local state matches
-the remote ticket."
+SUMMARY is the heading text and NEW-KEY its JIRA_KEY.  SPRINT, when
+non-nil, is recorded as the SPRINT property.  LABELS is the label list
+actually sent to Jira, recorded verbatim so local state matches the
+remote ticket."
   (let ((parent-pos (org-tickets--find-ticket-by-key parent-key)))
-    (if (not parent-pos)
+    (if parent-pos
         (progn
-          (goto-char (point-max))
-          (unless (bolp) (insert "\n"))
-          (insert "* " summary "\n"))
-      (goto-char parent-pos)
-      (let ((stars (make-string (1+ (or (org-current-level) 1)) ?*)))
-        (org-end-of-subtree t)
-        (insert "\n" stars " " summary "\n")))
+          (goto-char parent-pos)
+          (let ((stars (make-string (1+ (or (org-current-level) 1)) ?*)))
+            (org-end-of-subtree t)
+            (insert "\n" stars " " summary "\n")))
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (insert "* " summary "\n"))
     (org-entry-put (point) "JIRA_KEY" new-key)
     (org-entry-put (point) "JIRA_TYPE" "Story")
     (org-entry-put (point) "PARENT" parent-key)
@@ -433,26 +433,15 @@ Phase 3: apply all results to the org buffer synchronously."
   "Write KEY as JIRA_KEY on TICKET's heading, located via its marker.
 Markers survive the buffer edits earlier sync steps make, unlike the
 buffer positions captured at parse time."
-  (let ((m (org-tickets--ticket-marker ticket)))
-    (when (and (markerp m) (marker-position m)
-               (buffer-live-p (marker-buffer m)))
-      (with-current-buffer (marker-buffer m)
-        (save-excursion
-          (goto-char m)
-          (org-entry-put (point) "JIRA_KEY" key))))))
+  (org-tickets--at-ticket-marker ticket
+    (org-entry-put (point) "JIRA_KEY" key)))
 
 (defun org-tickets--ticket-buffer-key (ticket)
   "Read TICKET's current JIRA_KEY from the buffer via its marker.
 Picks up keys assigned earlier in the same sync run for tickets that
 were parsed without one.  Returns nil when unavailable."
-  (let ((m (org-tickets--ticket-marker ticket)))
-    (when (and (markerp m) (marker-position m)
-               (buffer-live-p (marker-buffer m)))
-      (with-current-buffer (marker-buffer m)
-        (save-excursion
-          (goto-char m)
-          (let ((key (org-entry-get (point) "JIRA_KEY")))
-            (and key (> (length key) 0) key)))))))
+  (org-tickets--at-ticket-marker ticket
+    (org-tickets--heading-property "JIRA_KEY")))
 
 (defun org-tickets--link-done-callback (from-key to-key done)
   "Return a callback for the FROM-KEY -> TO-KEY link that logs failures.
@@ -463,57 +452,42 @@ The callback then calls DONE."
                from-key to-key err))
     (funcall done nil nil)))
 
-(defun org-tickets--async-sync-ticket-links (ticket org-buffer callback)
+(defun org-tickets--link-thunk (from-key to-key)
+  "Return a batch thunk that creates a \"Blocks\" link FROM-KEY -> TO-KEY.
+Failures are logged; the thunk always completes."
+  (lambda (done)
+    (org-tickets--async-create-link
+     from-key to-key "Blocks"
+     (org-tickets--link-done-callback from-key to-key done))))
+
+(defun org-tickets--ticket-link-thunks (ticket key)
+  "Return the link thunks TICKET (whose key is KEY) needs.
+Child tickets block their parent; BLOCKS entries are blocked by KEY and
+BLOCKED-BY entries block KEY.  Links from a ticket to itself are dropped."
+  (let* ((parent-key (and (org-tickets--child-type-p (org-tickets--ticket-type ticket))
+                          (org-tickets--ticket-parent-key ticket)))
+         (targets (seq-remove
+                   (lambda (to) (string= key to))
+                   (append (and parent-key (> (length parent-key) 0)
+                                (list parent-key))
+                           (org-tickets--ticket-blocks ticket))))
+         (blockers (seq-remove (lambda (from) (string= key from))
+                               (org-tickets--ticket-blocked-by ticket))))
+    (append (mapcar (lambda (to) (org-tickets--link-thunk key to)) targets)
+            (mapcar (lambda (from) (org-tickets--link-thunk from key)) blockers))))
+
+(defun org-tickets--async-sync-ticket-links (ticket _org-buffer callback)
   "Asynchronously sync block relationships for TICKET.
 Collects all needed links (parent, blocks, blocked-by) and fires them
-concurrently via `org-tickets--async-batch'.
-ORG-BUFFER is the source buffer.  CALLBACK is called when all complete."
-  (catch 'org-tickets--links-done
-    (let* ((key (or (org-tickets--ticket-key ticket)
-                    (org-tickets--ticket-buffer-key ticket)))
-           (type (org-tickets--ticket-type ticket))
-           (thunks nil))
-      (unless (and key (stringp key) (> (length key) 0))
-        (funcall callback)
-        (throw 'org-tickets--links-done nil))
-      ;; Implicit blocks link to parent (child tickets only)
-      (when (org-tickets--child-type-p type)
-        (let* ((explicit-parent (org-tickets--ticket-parent ticket))
-               (parent-key (or explicit-parent
-                               (org-tickets--safe-with-buffer
-                                org-buffer
-                                (lambda ()
-                                  (let ((m (org-tickets--ticket-marker ticket)))
-                                    (when (and (markerp m) (marker-position m))
-                                      (goto-char m)
-                                      (org-tickets--find-parent-ticket-key))))))))
-          (when (and parent-key (> (length parent-key) 0)
-                     (not (string= key parent-key)))
-            (push (lambda (done)
-                    (org-tickets--async-create-link
-                     key parent-key "Blocks"
-                     (org-tickets--link-done-callback key parent-key done)))
-                  thunks))))
-      ;; Explicit BLOCKS
-      (dolist (blocked (org-tickets--ticket-blocks ticket))
-        (unless (string= key blocked)
-          (push (lambda (done)
-                  (org-tickets--async-create-link
-                   key blocked "Blocks"
-                   (org-tickets--link-done-callback key blocked done)))
-                thunks)))
-      ;; BLOCKED-BY (reverse direction)
-      (dolist (blocker (org-tickets--ticket-blocked-by ticket))
-        (unless (string= key blocker)
-          (push (lambda (done)
-                  (org-tickets--async-create-link
-                   blocker key "Blocks"
-                   (org-tickets--link-done-callback blocker key done)))
-                thunks)))
-      (if thunks
-          (org-tickets--async-batch (nreverse thunks)
-                                 (lambda (_results) (funcall callback)))
-        (funcall callback)))))
+concurrently via `org-tickets--async-batch'.  _ORG-BUFFER is unused;
+TICKET's marker locates its heading.  CALLBACK is called when all complete."
+  (let* ((key (or (org-tickets--ticket-key ticket)
+                  (org-tickets--ticket-buffer-key ticket)))
+         (thunks (and (stringp key) (> (length key) 0)
+                      (org-tickets--ticket-link-thunks ticket key))))
+    (if thunks
+        (org-tickets--async-batch thunks (lambda (_results) (funcall callback)))
+      (funcall callback))))
 
 (provide 'org-tickets-sync)
 
