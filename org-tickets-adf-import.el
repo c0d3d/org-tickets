@@ -236,17 +236,27 @@ a list marker that already provides the indentation)."
 The first block continues the marker line; every further block (and
 every continuation line) is prefixed with CONT-INDENT.  Nested lists
 receive CONT-INDENT as their base indent."
-  (let ((first t))
-    (mapconcat
-     (lambda (block)
-       (prog1
-           (pcase (org-tickets--adf-type block)
-             ("bulletList" (org-tickets--adf-list-to-org block cont-indent nil))
-             ("orderedList" (org-tickets--adf-list-to-org block cont-indent t))
-             (_ (org-tickets--indent-lines
-                 (org-tickets--adf-block-to-org block) cont-indent first)))
-         (setq first nil)))
-     (org-tickets--adf-node-content item) "\n")))
+  (let ((first t)
+        (parts nil))
+    (dolist (block (org-tickets--adf-node-content item))
+      (let ((plain (not (member (org-tickets--adf-type block)
+                                '("bulletList" "orderedList")))))
+        (push (concat (cond (first "")
+                            (plain "\n\n")
+                            (t "\n"))
+                      (org-tickets--adf-item-block-to-org block cont-indent first))
+              parts)
+        (setq first nil)))
+    (apply #'concat (nreverse parts))))
+
+(defun org-tickets--adf-item-block-to-org (block cont-indent first)
+  "Render BLOCK of a listItem, indented by CONT-INDENT.
+FIRST non-nil leaves a non-list block's first line unindented."
+  (pcase (org-tickets--adf-type block)
+    ("bulletList" (org-tickets--adf-list-to-org block cont-indent nil))
+    ("orderedList" (org-tickets--adf-list-to-org block cont-indent t))
+    (_ (org-tickets--indent-lines
+        (org-tickets--adf-block-to-org block) cont-indent first))))
 
 (defun org-tickets--adf-list-to-org (node indent ordered-p)
   "Render an ADF list NODE.

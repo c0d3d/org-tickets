@@ -118,6 +118,38 @@
                            (cdr (assoc "content" para)))
                    '("a" br "b")))))
 
+;;;; List items: block order and paragraph breaks
+
+(defun org-tickets-test--first-item-blocks (org-text)
+  "Return the block nodes of the first listItem pushed for ORG-TEXT."
+  (let* ((adf (org-tickets--build-adf-description org-text))
+         (list-node (car (cdr (assoc "content" adf))))
+         (item (car (cdr (assoc "content" list-node)))))
+    (cdr (assoc "content" item))))
+
+(defun org-tickets-test--block-text (block)
+  "Return the concatenated text of BLOCK's inline nodes."
+  (mapconcat (lambda (n) (or (cdr (assoc "text" n)) ""))
+             (cdr (assoc "content" block)) ""))
+
+(ert-deftest org-tickets-test--list-item-content-after-nested-list-keeps-order ()
+  (let ((blocks (org-tickets-test--first-item-blocks
+                 "- a\n  - nested\n\n  after nested\n- b")))
+    (should (equal (mapcar (lambda (b) (cdr (assoc "type" b))) blocks)
+                   '("paragraph" "bulletList" "paragraph")))
+    (should (equal (org-tickets-test--block-text (car (last blocks)))
+                   "after nested"))))
+
+(ert-deftest org-tickets-test--list-item-second-paragraph-not-indented ()
+  (let ((blocks (org-tickets-test--first-item-blocks "- a\n\n  second para")))
+    (should (equal (org-tickets-test--block-text (cadr blocks))
+                   "second para"))))
+
+(ert-deftest org-tickets-test--list-item-blocks-roundtrip-fixpoint ()
+  (dolist (text '("- a\n\n  second para"
+                  "- a\n  - nested\n\n  after nested\n- b"))
+    (should (equal (org-tickets-test--roundtrip-n text 3) text))))
+
 ;;;; Push: spacing that is content is kept
 
 (ert-deftest org-tickets-test--continuation-space-after-markup-kept ()

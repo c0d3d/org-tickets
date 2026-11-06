@@ -34,12 +34,6 @@ Each element is an alist with keys \"id\", \"filename\", and
 \"mediaApiFileId\" (the Media Services UUID Jira requires in ADF
 media nodes).")
 
-;;;; Org Element Type Helpers
-
-(defun org-tickets--plain-list-p (elem)
-  "Return non-nil if ELEM is a plain list."
-  (eq (org-element-type elem) 'plain-list))
-
 ;;;; ADF Conversion Helpers
 
 (defun org-tickets--adf-text-node (text &optional mark-type)
@@ -167,14 +161,18 @@ segments produce no text node."
 (defun org-tickets--build-inline-nodes (contents)
   "Build ADF inline nodes from CONTENTS, a list of org objects and strings.
 Internal newlines in plain-text runs become hardBreak nodes; the
-structural trailing newline on the final run is dropped."
+structural trailing newline on the final run is dropped.  Leading
+whitespace of the first run is org layout (e.g. a list item's second
+paragraph) and is dropped too."
   (let ((last-idx (1- (length contents)))
         (idx -1))
     (mapcan (lambda (elem)
               (setq idx (1+ idx))
               (if (stringp elem)
                   (org-tickets--string-to-adf-text-nodes
-                   (substring-no-properties elem) (= idx last-idx))
+                   (let ((text (substring-no-properties elem)))
+                     (if (= idx 0) (string-trim-left text) text))
+                   (= idx last-idx))
                 (org-tickets--convert-to-adf-content elem)))
             contents)))
 
@@ -334,19 +332,12 @@ attribute."
           (org-element-contents element)))
 
 (defun org-tickets--convert-to-adf-list-item (element)
-  "Convert org ELEMENT (type item) to ADF listItem.
-Handles content and nested plain-lists as bulletLists."
-  (let* ((contents (org-element-contents element))
-         ;; Separate content elements from nested plain-lists
-         (content-elems (seq-remove #'org-tickets--plain-list-p contents))
-         (nested-lists (seq-filter #'org-tickets--plain-list-p contents))
-         ;; Convert content elements (paragraphs, etc.) to ADF
-         (adf-content (mapcan #'org-tickets--convert-to-adf-content content-elems))
-         ;; Convert nested lists to ADF bulletLists
-         (nested-adf (mapcan #'org-tickets--convert-to-adf-list nested-lists)))
-    ;; Combine content elements and nested lists
-    (when (or adf-content nested-adf)
-      (list (org-tickets--adf-node "listItem" nil (append adf-content nested-adf))))))
+  "Convert org ELEMENT (type item) to an ADF listItem.
+Contents, nested lists included, keep their document order."
+  (let ((blocks (mapcan #'org-tickets--convert-to-adf-content
+                        (org-element-contents element))))
+    (when blocks
+      (list (org-tickets--adf-node "listItem" nil blocks)))))
 
 (defun org-tickets--convert-to-adf-line-break (_element)
   "Convert org _ELEMENT (type line-break, from `\\\\') to an ADF hardBreak."
