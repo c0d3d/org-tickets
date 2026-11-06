@@ -409,6 +409,15 @@ but the converter was using string keys with assoc, silently failing."
 
 ;;;; Task A1: description-region correctness
 
+(defun org-tickets-test--adf-paragraph-description (text)
+  "Import a Jira description that is one paragraph holding TEXT."
+  (org-tickets--parse-adf-description
+   (org-tickets-test--json
+    (json-encode
+     `(("type" . "doc") ("version" . 1)
+       ("content" . [(("type" . "paragraph")
+                      ("content" . [(("type" . "text") ("text" . ,text))]))]))))))
+
 (ert-deftest org-tickets-test--pull-preserves-child-subtrees ()
   "Updating a parent's description must not delete its child headings."
   (with-temp-buffer
@@ -474,13 +483,31 @@ but the converter was using string keys with assoc, silently failing."
     (goto-char (point-min))
     (org-tickets--update-org-heading-from-ticket
      (org-tickets--ticket-create :key "P-9" :type "Story" :summary "T"
-                              :description "* looks like a heading" :labels nil))
+                              :description (org-tickets-test--adf-paragraph-description
+                                            "* looks like a heading")
+                              :labels nil))
     (goto-char (point-min))
     ;; Exactly one headline in the buffer.
     (let ((count 0))
       (while (re-search-forward org-outline-regexp-bol nil t)
         (setq count (1+ count)))
       (should (= count 1)))))
+
+(ert-deftest org-tickets-test--pull-replaces-description-subheadings ()
+  "Pulling replaces old description headings but keeps child tickets."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* F\n:PROPERTIES:\n:JIRA_KEY: P-1\n:JIRA_TYPE: Feature\n:END:\n"
+            "Old.\n*** Old heading\nOld body.\n"
+            "** Child\n:PROPERTIES:\n:JIRA_KEY: P-2\n:JIRA_TYPE: Story\n:END:\n")
+    (goto-char (point-min))
+    (org-tickets--update-org-heading-from-ticket
+     (org-tickets--ticket-create :key "P-1" :type "Feature" :summary "F"
+                              :description "*** New heading\n\nNew." :labels nil))
+    (let ((text (buffer-string)))
+      (should (string-match-p "^\\*\\*\\* New heading$" text))
+      (should-not (string-match-p "Old" text))
+      (should (string-match-p "^\\*\\* Child$" text)))))
 
 ;;;; Task A2: new inline layer
 
@@ -526,20 +553,15 @@ but the converter was using string keys with assoc, silently failing."
                    "{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"rule\"}]}"))
                  "-----")))
 
-(ert-deftest org-tickets-test--adf-import-heading-is-not-org-comment ()
-  "Headings import as literal hN. lines — not `#' (an org comment that
-would be silently dropped on the next push) and not `*' (which would
-corrupt outline structure)."
+(ert-deftest org-tickets-test--adf-import-heading-is-org-headline ()
+  "Headings import as org headlines two levels deeper (h1 is ***), and
+push back as the same heading."
   (let ((result (org-tickets--parse-adf-description
                  (org-tickets-test--json
                   "{\"type\":\"doc\",\"version\":1,\"content\":[
                      {\"type\":\"heading\",\"attrs\":{\"level\":2},
                       \"content\":[{\"type\":\"text\",\"text\":\"Section\"}]}]}"))))
-    (should (equal result "h2. Section"))
-    ;; Round-trip guard: the produced text must survive an org->ADF push.
-    (let ((adf (org-tickets--build-adf-description result)))
-      (should adf)
-      (should (string-match-p "h2\\. Section" (json-encode adf))))))
+    (should (equal result "**** Section"))))
 
 (ert-deftest org-tickets-test--adf-import-code-block ()
   (should (equal (org-tickets--parse-adf-description
@@ -653,7 +675,8 @@ and | in content is escaped."
     (org-tickets--issue-to-org
      (org-tickets--ticket-create
       :key "P-1" :type "Story" :summary "S"
-      :description "* not a heading" :labels nil))
+      :description (org-tickets-test--adf-paragraph-description "* not a heading")
+      :labels nil))
     (goto-char (point-min))
     (let ((count 0))
       (while (re-search-forward org-outline-regexp-bol nil t) (setq count (1+ count)))

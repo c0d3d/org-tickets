@@ -432,14 +432,13 @@ This tests round-trip: export uses 'em', import should also handle 'em'."
 
 (ert-deftest org-tickets-test--parse-adf-heading-without-attrs ()
   "Test parsing ADF heading when attrs is absent.
-The importer defaults to level 1 and renders the literal \"hN. \" form
-(see `org-tickets--adf-heading-to-org'), never markdown-style \"# \"."
+The importer defaults to level 1, which is an org level-3 headline."
   (should (equal (org-tickets--parse-adf-description
                   (org-tickets-test--json
                    "{\"type\":\"doc\",\"version\":1,\"content\":[
                       {\"type\":\"heading\",
                        \"content\":[{\"type\":\"text\",\"text\":\"Simple Heading\"}]}]}"))
-                 "h1. Simple Heading")))
+                 "*** Simple Heading")))
 
 (ert-deftest org-tickets-test--parse-adf-codeblock-without-attrs ()
   "Test parsing ADF codeBlock when attrs is absent.

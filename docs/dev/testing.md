@@ -34,12 +34,13 @@ Test files mirror source modules:
 |--------|-----------|
 | `org-tickets-parse.el` | `org-tickets-test-parse.el` |
 | `org-tickets-sync.el` | `org-tickets-test-sync.el`, `org-tickets-test-sync-flow.el`, `org-tickets-test-sync-flow-phase2.el`, `org-tickets-test-sync-links.el`, `org-tickets-test-sync-sprint.el`, `org-tickets-test-sync-due-date.el`, `org-tickets-test-inheritance.el` |
-| `org-tickets-convert.el` | `org-tickets-test-convert.el`, `org-tickets-test-convert-nodes.el` |
+| `org-tickets-convert.el` | `org-tickets-test-convert.el`, `org-tickets-test-convert-nodes.el`, `org-tickets-test-list-continuation.el` (continuation-line indentation), `org-tickets-test-ordered-start.el` (ordered list start numbers) |
 | `org-tickets-fields.el` | `org-tickets-test-fields.el` |
 | `org-tickets-import.el` | `org-tickets-test-import.el` |
 | `org-tickets-adf-import.el` | `org-tickets-test-roundtrip.el` (org<->ADF round-trips) |
+| Description headings (parse, convert, import) | `org-tickets-test-headings-push.el` (org -> ADF, description boundaries), `org-tickets-test-headings-pull.el` (ADF -> org, pulls, round-trips) |
 | `org-tickets-attachments.el` | `org-tickets-test-attachments-upload.el`, `org-tickets-test-attachments-sync.el`, `org-tickets-test-attachments-async.el` |
-| `org-tickets-cmd.el` | `org-tickets-test-cmd.el` |
+| `org-tickets-cmd.el` | `org-tickets-test-cmd.el`, `org-tickets-test-cmd-ticket-at-point.el` (commands run from inside a ticket's description headings) |
 | `org-tickets-async.el` | `org-tickets-test-async.el` |
 | `org-tickets-core.el` | `org-tickets-test-record.el` (the `org-tickets--define-record` macro) |
 

@@ -28,6 +28,7 @@
 (require 'org-tickets-api)
 (require 'org-tickets-convert)
 (require 'org-tickets-adf-import)
+(require 'org-tickets-parse)
 
 (defun org-tickets--strip-type-prefix (type summary)
   "Return SUMMARY with a leading \"TYPE: \" prefix removed, if present.
@@ -146,13 +147,6 @@ JIRA-RESPONSE is the parsed JSON response from the Jira REST API."
      :due-date (org-tickets--alist-get "duedate" fields)
      :org-node nil)))
 
-(defun org-tickets--escape-headline-lines (text)
-  "Prefix headline-looking lines in TEXT with a space.
-A description line matching `^\\*+ ' would otherwise become a real
-org heading, corrupting document structure and truncating the
-description on the next parse."
-  (replace-regexp-in-string "^\\(\\*+ \\)" " \\1" text))
-
 (defun org-tickets--issue-to-org (ticket)
   "Insert TICKET as an org heading with Jira properties."
   (let* ((type (org-tickets--ticket-type ticket))
@@ -201,7 +195,7 @@ description on the next parse."
 
     ;; Insert description if present
     (when description
-      (insert "\n" (org-tickets--escape-headline-lines description) "\n"))
+      (insert "\n" description "\n"))
 
     ;; Insert attachments if present
     (when attachments
@@ -242,6 +236,7 @@ STORY_POINTS, BLOCKS, BLOCKED-BY, PARENT, SPRINT, and description body."
          (sprint (org-tickets--ticket-sprint ticket))
          (due-date (org-tickets--ticket-due-date ticket)))
 
+    (org-tickets--check-ticket-level type summary (org-current-level))
     ;; 1. Update the headline title to reflect the Jira summary (strip type prefix if present)
     (org-edit-headline (org-tickets--strip-type-prefix type summary))
 
@@ -264,44 +259,42 @@ STORY_POINTS, BLOCKS, BLOCKED-BY, PARENT, SPRINT, and description body."
     ;; IMPORTANT: compute the region only now — org-edit-headline and the
     ;; org-entry-put calls above changed buffer positions, so any element
     ;; captured earlier is stale.  The description ends at the first child
-    ;; heading (any deeper level), same rule as
-    ;; `org-tickets--get-ticket-description'.
+    ;; ticket heading, same rule as `org-tickets--get-ticket-description'.
     (save-excursion
       (org-back-to-heading t)
       (let* ((element (org-element-at-point))
              (content-begin (org-element-property :contents-begin element))
              (content-end (or (org-element-property :contents-end element)
-                              (org-element-property :contents-begin element))))
+                              content-begin)))
         (when content-begin
-          (goto-char content-begin)
           (let ((desc-start content-begin)
-                (desc-end content-end))
+                (desc-end (org-tickets--description-end content-end)))
+            (goto-char content-begin)
             (when (re-search-forward org-property-start-re desc-end t)
               (re-search-forward org-property-end-re desc-end t)
               (setq desc-start (point)))
-            (goto-char desc-start)
-            (when (re-search-forward org-outline-regexp-bol desc-end t)
-              (setq desc-end (match-beginning 0)))
             (when (< desc-start desc-end)
               (delete-region desc-start desc-end))
             (goto-char desc-start)
             ;; desc-start sits at the end of the :END: line; always restore
             ;; the newline the deletion consumed.
             (if description
-                (insert "\n" (org-tickets--escape-headline-lines description) "\n")
+                (insert "\n" description "\n")
               (insert "\n"))))))))
 
 (defun org-tickets--pull-remote-changes-for-current-ticket ()
-  "Fetch current ticket from Jira and update the org heading at point.
-Point must be on a heading with a JIRA_KEY property."
-  (let ((ticket-key (org-entry-get (point) "JIRA_KEY")))
-    (unless ticket-key
-      (user-error "No JIRA_KEY property on this heading; cannot pull remote changes"))
-    (org-tickets--resolve-config)
-    (let* ((jira-response (org-tickets--get-ticket ticket-key))
-           (ticket (org-tickets--parse-jira-issue jira-response)))
-      (org-tickets--update-org-heading-from-ticket ticket)
-      (message "org-tickets: Pulled remote changes for %s" ticket-key))))
+  "Fetch the ticket at point from Jira and update its org heading.
+Point may be anywhere inside the ticket, including its description
+headings; the owning heading must have a JIRA_KEY property."
+  (org-tickets--at-ticket-heading
+    (let ((ticket-key (org-entry-get (point) "JIRA_KEY")))
+      (unless ticket-key
+        (user-error "No JIRA_KEY property on this heading; cannot pull remote changes"))
+      (org-tickets--resolve-config)
+      (let* ((jira-response (org-tickets--get-ticket ticket-key))
+             (ticket (org-tickets--parse-jira-issue jira-response)))
+        (org-tickets--update-org-heading-from-ticket ticket)
+        (message "org-tickets: Pulled remote changes for %s" ticket-key)))))
 
 (provide 'org-tickets-import)
 

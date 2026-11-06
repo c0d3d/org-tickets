@@ -29,6 +29,7 @@
 (require 'org-tickets-api)
 (require 'org-tickets-sync)
 (require 'org-tickets-import)
+(require 'org-tickets-parse)
 (require 'org-tickets-attachments)
 
 ;;;; Setup and Configuration
@@ -125,31 +126,33 @@ be uploaded when the ticket is created.
 Uses org-attach to manage the attachment locally."
   (interactive "fAttach file: ")
   (require 'org-attach)
-  (let ((heading-key (org-entry-get (point) "JIRA_KEY")))
-    ;; Ensure we have an ID for org-attach - works even without a JIRA_KEY
-    (org-tickets--ensure-org-attach-id-for-current-heading)
-    ;; Use org-attach to add the file
-    (org-attach-attach file nil 'cp)
-    (if heading-key
-        (message "org-tickets: Attached %s to %s. Run org-tickets-sync-to-jira to upload."
-                 (file-name-nondirectory file) heading-key)
-      (message "org-tickets: Attached %s to current heading. File will be uploaded when ticket is created during sync."
-               (file-name-nondirectory file)))))
+  (org-tickets--at-ticket-heading
+    (let ((heading-key (org-entry-get (point) "JIRA_KEY")))
+      ;; Ensure we have an ID for org-attach - works even without a JIRA_KEY
+      (org-tickets--ensure-org-attach-id-for-current-heading)
+      ;; Use org-attach to add the file
+      (org-attach-attach file nil 'cp)
+      (if heading-key
+          (message "org-tickets: Attached %s to %s. Run org-tickets-sync-to-jira to upload."
+                   (file-name-nondirectory file) heading-key)
+        (message "org-tickets: Attached %s to current heading. File will be uploaded when ticket is created during sync."
+                 (file-name-nondirectory file))))))
 
 ;;;###autoload
 (defun org-tickets-attach-list ()
-  "List local and Jira attachments for the heading at point."
+  "List local and Jira attachments for the ticket at point."
   (interactive)
-  (let ((heading-key (org-entry-get (point) "JIRA_KEY")))
-    (unless heading-key
-      (user-error "No JIRA_KEY property on this heading"))
-    (let* ((local-dir (org-tickets--get-ticket-attach-dir nil))
-           (local-files (and local-dir (org-attach-file-list local-dir)))
-           (remote-files (mapcar #'org-tickets--attachment-filename
-                                 (org-tickets--get-attachments heading-key))))
-      (message "org-tickets: local: %s | jira: %s"
-               (if local-files (mapconcat #'identity local-files ", ") "none")
-               (if remote-files (mapconcat #'identity remote-files ", ") "none")))))
+  (org-tickets--at-ticket-heading
+    (let ((heading-key (org-entry-get (point) "JIRA_KEY")))
+      (unless heading-key
+        (user-error "No JIRA_KEY property on this heading"))
+      (let* ((local-dir (org-tickets--get-ticket-attach-dir nil))
+             (local-files (and local-dir (org-attach-file-list local-dir)))
+             (remote-files (mapcar #'org-tickets--attachment-filename
+                                   (org-tickets--get-attachments heading-key))))
+        (message "org-tickets: local: %s | jira: %s"
+                 (if local-files (mapconcat #'identity local-files ", ") "none")
+                 (if remote-files (mapconcat #'identity remote-files ", ") "none"))))))
 
 ;;;###autoload
 (defun org-tickets-attach-open ()
@@ -158,8 +161,9 @@ Works before the ticket exists in Jira — org-attach needs only the
 heading's ID property, which is created on demand."
   (interactive)
   (require 'org-attach)
-  (org-tickets--ensure-org-attach-id-for-current-heading)
-  (org-attach-reveal))
+  (org-tickets--at-ticket-heading
+    (org-tickets--ensure-org-attach-id-for-current-heading)
+    (org-attach-reveal)))
 
 ;;;###autoload
 (defun org-tickets-attach-remove (filename)
@@ -169,16 +173,24 @@ org-attach directory when present.  Interactively, completes over the
 union of local and Jira attachment names (the old \"f\" spec read an
 absolute path that could never match)."
   (interactive
-   (list (let* ((key (or (org-entry-get (point) "JIRA_KEY")
-                         (user-error "No JIRA_KEY property on this heading")))
-                (dir (org-tickets--get-ticket-attach-dir nil))
-                (local (and dir (org-attach-file-list dir)))
-                (remote (mapcar #'org-tickets--attachment-filename
-                                (org-tickets--get-attachments key)))
-                (names (delete-dups (append local remote))))
-           (unless names
-             (user-error "No attachments found for %s" key))
-           (completing-read "Remove attachment: " names nil t))))
+   (list (org-tickets--at-ticket-heading
+           (let* ((key (or (org-entry-get (point) "JIRA_KEY")
+                           (user-error "No JIRA_KEY property on this heading")))
+                  (dir (org-tickets--get-ticket-attach-dir nil))
+                  (local (and dir (org-attach-file-list dir)))
+                  (remote (mapcar #'org-tickets--attachment-filename
+                                  (org-tickets--get-attachments key)))
+                  (names (delete-dups (append local remote))))
+             (unless names
+               (user-error "No attachments found for %s" key))
+             (completing-read "Remove attachment: " names nil t)))))
+  (org-tickets--at-ticket-heading
+    (org-tickets--remove-attachment filename)))
+
+(defun org-tickets--remove-attachment (filename)
+  "Remove attachment FILENAME for the ticket heading at point.
+Deletes it from Jira and from the local org-attach directory, whichever
+have it, and reports where it was removed from."
   (let* ((heading-key (or (org-entry-get (point) "JIRA_KEY")
                           (error "No JIRA_KEY property on this heading")))
          (attach-dir (org-tickets--get-ticket-attach-dir nil))
@@ -229,7 +241,7 @@ and you need to sync those changes into your local org buffer."
 (defun org-tickets-copy-link ()
   "Copy the Jira browse link for the ticket at point."
   (interactive)
-  (let ((key (org-entry-get (point) "JIRA_KEY")))
+  (let ((key (org-tickets--at-ticket-heading (org-entry-get (point) "JIRA_KEY"))))
     (unless (and key (> (length key) 0))
       (user-error "No JIRA_KEY property on this heading"))
     (org-tickets--copy-ticket-link-to-clipboard key)))

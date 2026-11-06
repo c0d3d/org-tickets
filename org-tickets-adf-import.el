@@ -117,13 +117,36 @@ Supported: code, strong, em/emphasis, underline, strike, subsup, link."
 ;;;; Block Layer
 
 (defun org-tickets--adf-heading-to-org (node)
-  "Render an ADF heading NODE as a literal \"hN. Title\" line.
-Real org stars would corrupt outline structure and `#' lines are org
-comments that get dropped on push, so the level is kept textually."
+  "Render an ADF heading NODE as an org headline.
+Level N becomes N+2 stars (h1 is `***'), the inverse of
+`org-tickets--convert-to-adf-headline'.  Line breaks in the title become
+spaces so the rest of the title does not fall into the section."
   (let* ((attrs (org-tickets--adf-attrs node))
          (level (or (and attrs (org-tickets--alist-get "level" attrs)) 1)))
-    (format "h%d. %s" level
-            (org-tickets--adf-inlines-to-org (org-tickets--adf-node-content node)))))
+    (concat (make-string (+ level 2) ?*) " "
+            (string-replace "\n" " " (org-tickets--adf-inlines-to-org
+                                     (org-tickets--adf-node-content node))))))
+
+(defun org-tickets--adf-empty-heading-p (node)
+  "Non-nil when NODE is a heading with no content.
+An empty org headline cannot survive description trimming, and there is
+nothing in it to keep."
+  (and (equal (org-tickets--adf-type node) "heading")
+       (null (org-tickets--adf-node-content node))))
+
+(defun org-tickets--escape-headline-lines (text)
+  "Prefix headline-looking lines in TEXT with a space.
+A description line matching `^\\*+ ' would otherwise become a real
+org heading, corrupting document structure and truncating the
+description on the next parse."
+  (replace-regexp-in-string "^\\(\\*+ \\)" " \\1" text))
+
+(defun org-tickets--adf-top-block-to-org (node)
+  "Render top-level block NODE; only heading nodes may emit org headlines."
+  (let ((text (org-tickets--adf-block-to-org node)))
+    (if (equal (org-tickets--adf-type node) "heading")
+        text
+      (org-tickets--escape-headline-lines text))))
 
 (defun org-tickets--adf-code-block-to-org (node)
   "Render an ADF codeBlock NODE as an org src block."
@@ -227,10 +250,13 @@ receive CONT-INDENT as their base indent."
 
 (defun org-tickets--adf-list-to-org (node indent ordered-p)
   "Render an ADF list NODE.
-INDENT prefixes each marker line; ORDERED-P selects \"N. \" markers.
+INDENT prefixes each marker line; ORDERED-P selects \"N. \" markers,
+numbered from the node's \"order\" attribute (default 1).
 Continuation indent is INDENT plus the marker's own width, so org
 sees nested content as belonging to the item."
-  (let ((idx 0))
+  (let* ((attrs (org-tickets--adf-attrs node))
+         (idx (1- (or (and ordered-p attrs (org-tickets--alist-get "order" attrs))
+                      1))))
     (mapconcat
      (lambda (item)
        (setq idx (1+ idx))
@@ -272,8 +298,9 @@ sees nested content as belonging to the item."
 Returns nil when ADF is nil or has no content.  Accepts both a full
 doc node and a bare content wrapper."
   (when adf
-    (let* ((content (org-tickets--adf-node-content adf))
-           (text (mapconcat #'org-tickets--adf-block-to-org content "\n\n")))
+    (let* ((content (seq-remove #'org-tickets--adf-empty-heading-p
+                                (org-tickets--adf-node-content adf)))
+           (text (mapconcat #'org-tickets--adf-top-block-to-org content "\n\n")))
       (and (> (length text) 0) text))))
 
 (provide 'org-tickets-adf-import)

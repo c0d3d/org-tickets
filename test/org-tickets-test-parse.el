@@ -44,6 +44,27 @@ Story description."))
         (should desc)
         (should (string= desc "This is the parent description."))))))
 
+(ert-deftest org-tickets-test--description-includes-non-ticket-subheadings ()
+  "Non-ticket child headings belong to the description; the first child
+ticket ends it."
+  (with-temp-buffer
+    (insert "** Story
+:PROPERTIES:
+:JIRA_TYPE: Story
+:END:
+Intro.
+*** Details
+More.
+*** Sub-task
+:PROPERTIES:
+:JIRA_TYPE: Sub-task
+:END:
+Child body.")
+    (org-mode)
+    (goto-char (point-min))
+    (should (string= (org-tickets--get-ticket-description (org-element-at-point))
+                     "Intro.\n*** Details\nMore."))))
+
 (ert-deftest org-tickets-test--description-bold-not-confused-with-heading ()
   "Test that bold markup like **NOTE:** is not mistaken for a child heading."
   (let ((content "* My Story
@@ -569,17 +590,6 @@ Description.
       (should (markerp m))
       (should (eq (marker-buffer m) (current-buffer)))
       (should (= (marker-position m) 1)))))
-
-(ert-deftest org-tickets-test--find-parent-climbs-multiple-levels ()
-  "The parent Feature can be more than one outline level up."
-  (with-temp-buffer
-    (org-mode)
-    (insert "* Feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n:END:\n"
-            "** Grouping heading\n"
-            "*** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n")
-    (goto-char (point-min))
-    (search-forward "*** Story")
-    (should (equal (org-tickets--find-parent-ticket-key) "P-1"))))
 
 (ert-deftest org-tickets-test--find-parent-never-returns-self ()
   "A top-level Feature has no parent — it must not return itself."

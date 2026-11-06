@@ -75,18 +75,6 @@
     (org-tickets--inherit-parent-properties-in-buffer)
     (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))))
 
-(ert-deftest org-tickets-test--due-date-inheritance-cascades-through-levels ()
-  "Inheritance reaches a grandchild through a parent that also inherited."
-  (with-temp-buffer
-    (org-mode)
-    (insert "* Feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
-            ":DUE_DATE: 2026-08-01\n:END:\n"
-            "** Story\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n:END:\n"
-            "*** Subtask\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-3\n:END:\n")
-    (org-tickets--inherit-parent-properties-in-buffer)
-    (should (equal (org-tickets-test--due-date-of "P-2") "2026-08-01"))
-    (should (equal (org-tickets-test--due-date-of "P-3") "2026-08-01"))))
-
 (ert-deftest org-tickets-test--due-date-inheritance-keeps-existing-date ()
   "A child that already has its own due date keeps it."
   (with-temp-buffer

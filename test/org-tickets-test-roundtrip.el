@@ -72,10 +72,11 @@ demoted to a plain data table."
                   "| Name | Age |\n|---+---|\n| Ann | 4 |")
                  "| Name | Age |\n|---+---|\n| Ann | 4 |")))
 
-(ert-deftest org-tickets-test--roundtrip-imported-heading-is-stable ()
-  "hN. lines survive push+pull unchanged (stable fixpoint)."
-  (should (equal (org-tickets-test--roundtrip "h2. Section Title")
-                 "h2. Section Title")))
+(ert-deftest org-tickets-test--roundtrip-headings-with-body ()
+  "Org headlines survive push+pull with their levels and bodies."
+  (should (equal (org-tickets-test--roundtrip
+                  "Intro.\n\n*** Top\n\nBody.\n\n**** Nested")
+                 "Intro.\n\n*** Top\n\nBody.\n\n**** Nested")))
 
 (provide 'org-tickets-test-roundtrip)
 ;;; org-tickets-test-roundtrip.el ends here

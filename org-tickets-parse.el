@@ -40,6 +40,45 @@ form evaluates to nil and BODY is skipped.  Point is moved without
          (goto-char ,pos)
          ,@body))))
 
+(defun org-tickets--ticket-heading-p ()
+  "Non-nil when the heading at point is a ticket (has JIRA_TYPE or JIRA_KEY)."
+  (or (org-entry-get (point) "JIRA_TYPE")
+      (org-entry-get (point) "JIRA_KEY")))
+
+(defun org-tickets--ticket-heading-position ()
+  "Return the position of the ticket heading that owns point.
+That is the nearest heading at or above point that is a ticket, so
+commands work from inside description headings.  Falls back to the
+heading at point when no ticket owns it, and to nil before the first
+heading."
+  (save-excursion
+    (unless (org-before-first-heading-p)
+      (org-back-to-heading t)
+      (let ((own (point)))
+        (while (and (not (org-tickets--ticket-heading-p))
+                    (org-up-heading-safe)))
+        (if (org-tickets--ticket-heading-p) (point) own)))))
+
+(defmacro org-tickets--at-ticket-heading (&rest body)
+  "Evaluate BODY with point on the ticket heading that owns point.
+See `org-tickets--ticket-heading-position'.  Point is restored after."
+  (declare (indent 0) (debug (body)))
+  (let ((pos (make-symbol "pos")))
+    `(let ((,pos (org-tickets--ticket-heading-position)))
+       (save-excursion
+         (when ,pos (goto-char ,pos))
+         ,@body))))
+
+(defun org-tickets--check-ticket-level (type title level)
+  "Signal a `user-error' unless a TYPE ticket TITLE may sit at outline LEVEL.
+Parent types (Features) must be level 1 and every other ticket level 1
+or 2, so description headings (`***' and deeper) always nest inside
+their ticket."
+  (unless (if (org-tickets--parent-type-p type) (= level 1) (<= level 2))
+    (user-error "org-tickets: %s \"%s\" is at outline level %d; \
+features must be level 1 and other tickets level 1 or 2"
+                type title level)))
+
 (defun org-tickets--append-csv-property (property value)
   "Append VALUE to the comma-separated org PROPERTY on the heading at point.
 An empty or absent property becomes VALUE; otherwise VALUE is appended
@@ -113,6 +152,8 @@ Returns an org-tickets--ticket struct or nil if not a valid ticket."
          (due-date-str (org-entry-get (point) "DUE_DATE")))
 
     (when type-prop
+      (org-tickets--check-ticket-level
+       type-prop title (org-element-property :level element))
       (org-tickets--ticket-create
        :key key-prop
        :type type-prop
@@ -140,9 +181,22 @@ Returns an org-tickets--ticket struct or nil if not a valid ticket."
                                 (or (string= (string-trim story-points-str) "")
                                     (= 0 (string-to-number story-points-str))))))))
 
+(defun org-tickets--description-end (limit)
+  "Return where the description of the ticket heading at point ends.
+That is the first heading below it, before LIMIT, that is itself a
+ticket (has JIRA_TYPE), or LIMIT when there is none.  Other headings
+are part of the description and push as ADF headings."
+  (save-excursion
+    (let ((end nil))
+      (while (and (not end) (outline-next-heading) (< (point) limit))
+        (when (org-entry-get (point) "JIRA_TYPE")
+          (setq end (point))))
+      (or end limit))))
+
 (defun org-tickets--get-ticket-description (node)
   "Get the description content from org heading NODE.
-Returns nil if there is no description (only child headings or empty)."
+The description runs up to the first child ticket heading; non-ticket
+child headings are included.  Returns nil if it is empty."
   (let ((begin (org-element-property :contents-begin node))
         (end (org-element-property :contents-end node)))
     (when (and begin end)
@@ -153,19 +207,10 @@ Returns nil if there is no description (only child headings or empty)."
               (re-search-forward org-property-start-re end t))
         (re-search-forward org-property-end-re end t)
         (setq begin (point)))
-      ;; Find if there's a child heading within the content
-      (goto-char begin)
-      (if (re-search-forward org-outline-regexp-bol end t)
-          ;; There's a child heading - only get content before it
-          (progn
-            (goto-char (match-beginning 0))
-            (let ((content (buffer-substring-no-properties begin (point))))
-              (setq content (string-trim content))
-              (when (> (length content) 0) content)))
-        ;; No child heading - get all content
-        (let ((content (buffer-substring-no-properties begin end)))
-          (setq content (string-trim content))
-          (when (> (length content) 0) content))))))
+      (goto-char (org-element-property :begin node))
+      (let ((content (string-trim (buffer-substring-no-properties
+                                   begin (org-tickets--description-end end)))))
+        (when (> (length content) 0) content)))))
 
 (defun org-tickets--resolve-blocked-by-in-org (doc)
   "Update org buffer BLOCKS properties from BLOCKED-BY relationships in DOC.

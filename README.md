@@ -162,6 +162,33 @@ Story description.
 Story description.
 ```
 
+### Ticket Levels
+
+Features (and the other parent types: New Feature, Improvement, Epic)
+must be top-level `*` headings; Stories and other tickets must be at
+level 1 or 2.  Sync and pull stop with an error naming any ticket that
+is deeper, since its description headings could not nest inside it.
+
+### Description Headings
+
+Headlines under a ticket that have no `JIRA_TYPE` are part of its
+description and push as Jira headings: `***` is h1, `****` is h2, and so
+on down to h6.  The description ends at the first heading below it
+that is itself a ticket.
+Commands such as `org-tickets-copy-link`, `org-tickets-pull-remote-changes`
+and the attachment commands act on the owning ticket when run from
+inside a description heading.
+
+```org
+** Story: Login Form
+:PROPERTIES:
+:JIRA_TYPE: Story
+:END:
+Intro text.
+*** Requirements
+**** Edge cases
+```
+
 ### Ticket Properties
 
 | Property | Description |

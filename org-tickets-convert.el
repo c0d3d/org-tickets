@@ -126,28 +126,39 @@ stores in :post-blank is re-emitted as an unmarked text node."
   (mapcan #'org-tickets--convert-to-adf-content (org-element-contents element)))
 
 (defun org-tickets--convert-to-adf-headline (element)
-  "Convert org ELEMENT (type headline) to ADF content."
-  (let* ((title-raw (or (org-element-property :raw-value element)
-                        (org-element-property :title element)))
-         (title (if (stringp title-raw) (substring-no-properties title-raw) "")))
-    (list (org-tickets--adf-node
-           "paragraph" nil
-           (org-tickets--adf-text-node (concat "h. " title) "strong")))))
+  "Convert org ELEMENT (type headline) to an ADF heading and its body.
+Org level 3 (`***') is h1 and each extra star one level deeper, clamped
+to h1..h6, so headings sit below the ticket headings that hold them.
+A COMMENT headline is dropped with its subtree, like comment blocks."
+  (let ((level (max 1 (min 6 (- (org-element-property :level element) 2)))))
+    (unless (org-element-property :commentedp element)
+      (cons (org-tickets--adf-node
+             "heading" (list (cons "level" level))
+             (org-tickets--build-inline-nodes
+              (org-element-property :title element)))
+            (mapcan #'org-tickets--convert-to-adf-content
+                    (org-element-contents element))))))
 
 (defun org-tickets--string-to-adf-text-nodes (text last-child-p)
   "Convert a plain-text run TEXT into ADF inline nodes.
 Internal newlines become hardBreak nodes so multi-line paragraphs keep
-their line structure in Jira.  When LAST-CHILD-P, the trailing newline
-org stores as the paragraph terminator is dropped rather than turned
-into a hardBreak.  Empty segments produce no text node."
+their line structure in Jira.  A line after a newline loses its leading
+indentation: that is org layout (e.g. a list item's continuation), and
+pushed as text Jira would show it and each pull would indent it again.
+When LAST-CHILD-P, the trailing newline org stores as the paragraph
+terminator is dropped rather than turned into a hardBreak.  Empty
+segments produce no text node."
   (when last-child-p
     (setq text (replace-regexp-in-string "\n+\\'" "" text)))
   (let ((segments (split-string text "\n"))
-        (nodes nil))
+        (nodes nil)
+        (continuation-p nil))
     (while segments
       (let ((seg (pop segments)))
-        (dolist (node (org-tickets--adf-text-node seg))
+        (dolist (node (org-tickets--adf-text-node
+                       (if continuation-p (string-trim-left seg) seg)))
           (push node nodes))
+        (setq continuation-p t)
         ;; A remaining segment means this newline is an internal soft break.
         (when segments
           (push (org-tickets--adf-node "hardBreak") nodes))))
@@ -294,13 +305,25 @@ bare links fall back to the URL."
               (org-tickets--adf-text-node
                (org-tickets--adf-post-blank-spaces element))))))
 
+(defun org-tickets--ordered-list-start (element)
+  "Return the number ordered plain-list ELEMENT starts at, or nil.
+That is the first item's [@N] counter, else its bullet's number; nil
+for a non-numeric bullet without a counter (an alphabetical list)."
+  (let* ((item (car (org-element-contents element)))
+         (bullet (org-element-property :bullet item)))
+    (or (org-element-property :counter item)
+        (and (string-match-p "\\`[0-9]" bullet)
+             (string-to-number bullet)))))
+
 (defun org-tickets--convert-to-adf-list (element)
-  "Convert org ELEMENT (type plain-list) to an ADF list node."
-  (let ((node-type (if (eq (org-element-property :type element) 'ordered)
-                       "orderedList"
-                     "bulletList")))
+  "Convert org ELEMENT (type plain-list) to an ADF list node.
+An ordered list not starting at 1 carries its start as the \"order\"
+attribute."
+  (let* ((ordered-p (eq (org-element-property :type element) 'ordered))
+         (start (and ordered-p (org-tickets--ordered-list-start element))))
     (list (org-tickets--adf-node
-           node-type nil
+           (if ordered-p "orderedList" "bulletList")
+           (and start (/= start 1) (list (cons "order" start)))
            (mapcan #'org-tickets--convert-to-adf-list-item
                    (org-element-contents element))))))
 
