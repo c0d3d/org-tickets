@@ -47,16 +47,6 @@ falls back to the alt attribute (which Jira sets to the filename)."
      (alt (format "[[attachment:%s]]" alt))
      (t (format "[media: %s]" (or id "unknown"))))))
 
-(defun org-tickets--ensure-list (value)
-  "Return VALUE as a proper list.
-JSON arrays are lists in this codebase, but tolerate vectors from
-other parser configurations."
-  (cond
-   ((null value) nil)
-   ((vectorp value) (append value nil))
-   ((proper-list-p value) value)
-   (t (list value))))
-
 (defun org-tickets--adf-type (node)
   "Return NODE's ADF type string, or nil when NODE has none."
   (and (consp node) (org-tickets--alist-get "type" node)))

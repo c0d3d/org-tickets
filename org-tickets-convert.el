@@ -226,9 +226,9 @@ UUID (the attachment's mediaApiFileId).  The numeric REST attachment id
 produces a permanently broken embed, so callers must fall back to plain
 text when no UUID is available."
   (let ((att (seq-find (lambda (a)
-                         (equal (org-tickets--alist-get "filename" a) filename))
+                         (equal (org-tickets--attachment-filename a) filename))
                        attachments)))
-    (when att (org-tickets--alist-get "mediaApiFileId" att))))
+    (when att (org-tickets--attachment-media-id att))))
 
 (defun org-tickets--adf-media-attrs (uuid)
   "Return ADF media node attrs referencing attachment media UUID."

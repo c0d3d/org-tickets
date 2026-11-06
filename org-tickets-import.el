@@ -59,20 +59,6 @@ order, matching the historical parse."
             (push (org-tickets--alist-get "key" inward) blocked-by)))))
     (cons blocks blocked-by)))
 
-(defun org-tickets--parse-attachments (attachments-data)
-  "Parse the raw Jira ATTACHMENTS-DATA list into a list of alists.
-Each element has keys id, filename, url, size, and media-api-file-id."
-  (let ((result nil))
-    (dolist (att (org-tickets--ensure-list attachments-data))
-      (push (list (cons 'id (org-tickets--alist-get "id" att))
-                  (cons 'filename (org-tickets--alist-get "filename" att))
-                  (cons 'url (org-tickets--alist-get "content" att))
-                  (cons 'size (org-tickets--alist-get "size" att))
-                  (cons 'media-api-file-id
-                        (org-tickets--alist-get "mediaApiFileId" att)))
-            result))
-    (nreverse result)))
-
 (defun org-tickets--build-attachment-id-map (attachments)
   "Build an alist mapping attachment IDs to filenames from ATTACHMENTS.
 Indexes each attachment by both its numeric Jira id and its
@@ -80,9 +66,9 @@ mediaApiFileId (UUID) so ADF media nodes — which reference the UUID —
 resolve to a filename either way."
   (let ((map nil))
     (dolist (att attachments map)
-      (let ((id (cdr (assoc 'id att)))
-            (filename (cdr (assoc 'filename att)))
-            (media-id (cdr (assoc 'media-api-file-id att))))
+      (let ((id (org-tickets--attachment-id att))
+            (filename (org-tickets--attachment-filename att))
+            (media-id (org-tickets--attachment-media-id att)))
         (when (and id filename)
           (push (cons id filename) map))
         (when (and media-id filename)
@@ -110,8 +96,7 @@ JIRA-RESPONSE is the parsed JSON response from the Jira REST API."
          (issuetype (org-tickets--alist-get "issuetype" fields))
          (issuelinks (append (org-tickets--alist-get "issuelinks" fields) nil))
          (links (org-tickets--parse-issuelinks issuelinks))
-         (attachments (org-tickets--parse-attachments
-                       (org-tickets--issue-attachments jira-response)))
+         (attachments (org-tickets--issue-attachments jira-response))
          ;; Bound dynamically so the description ADF parse below can resolve
          ;; media nodes by attachment id/UUID.
          (org-tickets--adf-attachment-id-map
@@ -180,8 +165,8 @@ with an empty string, and an absent STORY_POINTS is deleted."
     (when description
       (insert "\n" description "\n"))
     (dolist (att attachments)
-      (let ((filename (cdr (assoc 'filename att)))
-            (url (cdr (assoc 'url att))))
+      (let ((filename (org-tickets--attachment-filename att))
+            (url (org-tickets--attachment-content-url att)))
         (when filename
           (insert "\n- " filename " ")
           (org-insert-link nil url filename))))))

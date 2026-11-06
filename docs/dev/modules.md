@@ -6,7 +6,7 @@ The package is split into logical modules for maintainability.
 
 | Module | Responsibility |
 |--------|---------------|
-| `org-tickets-core.el` | Requires, defcustoms, defvars, the `org-tickets--define-record` macro, data structures (`org-tickets--ticket`, `org-tickets--doc`) |
+| `org-tickets-core.el` | Requires, defcustoms, defvars, the `org-tickets--define-record` macro, data structures (`org-tickets--ticket`, `org-tickets--doc`), alist/list utilities, Jira attachment accessors |
 | `org-tickets-api.el` | Jira REST API client, config resolution, HTTP requests, issue type management |
 | `org-tickets-async.el` | Async HTTP layer: `url-retrieve` wrapper, rate limiting, batch execution, modeline progress |
 | `org-tickets-attachments.el` | Upload/download/sync attachments (depends on API module) |

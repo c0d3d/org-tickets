@@ -152,26 +152,21 @@
 (ert-deftest org-tickets-test--parse-jira-issue-preserves-attachment-id ()
   "Test that parse-jira-issue preserves the Jira attachment ID."
   (let* ((jira-response
-          (list (cons "id" "99999")
-                (cons "key" "PROJ-200")
-                (cons "fields"
-                      (list (cons "issuetype" (list (cons "name" "Story")))
-                            (cons "summary" "Test ticket")
-                            (cons "attachment"
-                                  (list (list (cons "id" "10001")
-                                              (cons "filename" "report.pdf")
-                                              (cons "content" "https://example.com/att/10001")
-                                              (cons "size" 5000))
-                                        (list (cons "id" "10002")
-                                              (cons "filename" "image.png")
-                                              (cons "content" "https://example.com/att/10002")
-                                              (cons "size" 3000))))))))
+          (org-tickets-test--json
+           "{\"id\": \"99999\", \"key\": \"PROJ-200\",
+             \"fields\": {\"issuetype\": {\"name\": \"Story\"},
+               \"summary\": \"Test ticket\",
+               \"attachment\": [
+                 {\"id\": \"10001\", \"filename\": \"report.pdf\",
+                  \"content\": \"https://example.com/att/10001\", \"size\": 5000},
+                 {\"id\": \"10002\", \"filename\": \"image.png\",
+                  \"content\": \"https://example.com/att/10002\", \"size\": 3000}]}}"))
          (ticket (org-tickets--parse-jira-issue jira-response))
          (attachments (org-tickets--ticket-attachments ticket)))
     (should (= (length attachments) 2))
-    (should (string= (cdr (assoc 'id (car attachments))) "10001"))
-    (should (string= (cdr (assoc 'filename (car attachments))) "report.pdf"))
-    (should (string= (cdr (assoc 'id (cadr attachments))) "10002"))))
+    (should (string= (org-tickets--attachment-id (car attachments)) "10001"))
+    (should (string= (org-tickets--attachment-filename (car attachments)) "report.pdf"))
+    (should (string= (org-tickets--attachment-id (cadr attachments)) "10002"))))
 
 ;;;; Media / Attachment Import Tests
 

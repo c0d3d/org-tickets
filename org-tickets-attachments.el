@@ -180,11 +180,11 @@ orders them correctly."
   (let ((seen (make-hash-table :test #'equal)))
     (dolist (att attachments)
       (let* ((name (org-tickets--attachment-filename att))
-             (created (or (org-tickets--alist-get "created" att) ""))
+             (created (or (org-tickets--attachment-created att) ""))
              (existing (gethash name seen)))
         (when (or (null existing)
                   (string> created
-                           (or (org-tickets--alist-get "created" existing) "")))
+                           (or (org-tickets--attachment-created existing) "")))
           (puthash name att seen))))
     (hash-table-values seen)))
 
@@ -196,7 +196,7 @@ current locally are skipped."
    (lambda (att)
      (let ((filename (org-tickets--attachment-filename att))
            (url (org-tickets--attachment-content-url att))
-           (size (or (org-tickets--alist-get "size" att) 0)))
+           (size (or (org-tickets--attachment-size att) 0)))
        (lambda (done)
          (org-tickets--async-download-attachment
           url filename attach-dir size done))))
@@ -204,7 +204,7 @@ current locally are skipped."
     (lambda (att)
       (org-tickets--local-attachment-current-p
        (expand-file-name (org-tickets--attachment-filename att) attach-dir)
-       (org-tickets--alist-get "size" att)))
+       (org-tickets--attachment-size att)))
     (org-tickets--dedup-attachments-by-filename attachments))))
 
 (defun org-tickets--async-download-attachments (ticket-key attachments callback)
@@ -268,22 +268,9 @@ Returns a list of attachment metadata alists with keys:
 Note: The Jira Cloud REST API v3 does not support GET on the
 /rest/api/3/issue/{issueIdOrKey}/attachments endpoint (returns 405).
 Instead, we fetch the issue with fields=attachment to get attachment metadata."
-  (org-tickets--response-field
+  (org-tickets--issue-attachments
    (org-tickets--api-request
-    "GET" (concat "/rest/api/3/issue/" ticket-key "?fields=attachment"))
-   "attachment"))
-
-(defun org-tickets--attachment-filename (attachment)
-  "Get filename from ATTACHMENT metadata alist."
-  (org-tickets--alist-get "filename" attachment))
-
-(defun org-tickets--attachment-id (attachment)
-  "Get attachment ID from ATTACHMENT metadata alist."
-  (org-tickets--alist-get "id" attachment))
-
-(defun org-tickets--attachment-content-url (attachment)
-  "Get download URL from ATTACHMENT metadata alist."
-  (org-tickets--alist-get "content" attachment))
+    "GET" (concat "/rest/api/3/issue/" ticket-key "?fields=attachment"))))
 
 (defun org-tickets--get-ticket-attach-dir (create-if-not-exists)
   "Get the attachment directory for the org heading at point.

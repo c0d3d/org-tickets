@@ -44,6 +44,45 @@ ADF alists use string keys.  KEY must be a string."
       (let ((sym (intern-soft key)))
         (and sym (cdr (assoc sym alist))))))
 
+(defun org-tickets--ensure-list (value)
+  "Return VALUE as a proper list.
+JSON arrays are lists in this codebase, but tolerate vectors from
+other parser configurations."
+  (cond
+   ((null value) nil)
+   ((vectorp value) (append value nil))
+   ((proper-list-p value) value)
+   (t (list value))))
+
+;;;; Jira attachment accessors
+
+;; Attachments travel everywhere as the raw Jira metadata alists; only
+;; these accessors read their keys.
+
+(defun org-tickets--attachment-filename (attachment)
+  "Get filename from ATTACHMENT metadata alist."
+  (org-tickets--alist-get "filename" attachment))
+
+(defun org-tickets--attachment-id (attachment)
+  "Get attachment ID from ATTACHMENT metadata alist."
+  (org-tickets--alist-get "id" attachment))
+
+(defun org-tickets--attachment-content-url (attachment)
+  "Get download URL from ATTACHMENT metadata alist."
+  (org-tickets--alist-get "content" attachment))
+
+(defun org-tickets--attachment-size (attachment)
+  "Get the size in bytes from ATTACHMENT metadata alist, or nil."
+  (org-tickets--alist-get "size" attachment))
+
+(defun org-tickets--attachment-created (attachment)
+  "Get the ISO-8601 creation timestamp from ATTACHMENT metadata alist, or nil."
+  (org-tickets--alist-get "created" attachment))
+
+(defun org-tickets--attachment-media-id (attachment)
+  "Get the Media Services UUID (mediaApiFileId) from ATTACHMENT, or nil."
+  (org-tickets--alist-get "mediaApiFileId" attachment))
+
 ;;;; Configuration Group
 
 (defgroup org-tickets nil

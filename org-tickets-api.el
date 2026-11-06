@@ -27,7 +27,6 @@
 
 (require 'org-tickets-core)
 (require 'org-tickets-fields)
-(require 'org-tickets-adf-import)
 
 ;;;; Jira API Client
 
@@ -74,7 +73,7 @@ The sprint is read from the field named by `org-tickets-sprint-field'."
 
 (defun org-tickets--issue-attachments (response)
   "Return the raw Jira attachment list of issue RESPONSE, or nil."
-  (org-tickets--response-field response "attachment"))
+  (org-tickets--ensure-list (org-tickets--response-field response "attachment")))
 
 (defun org-tickets--resolve-config ()
   "Resolve configuration from custom vars and authinfo."

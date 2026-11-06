@@ -451,27 +451,26 @@ With no \"attrs\"/\"language\", the src block has no language tag."
 (ert-deftest org-tickets-test--parse-jira-issue-with-attachments ()
   "Test parsing Jira issue with attachments."
   (let* ((jira-response
-          (list (cons "id" "12345")
-                (cons "key" "PROJ-100")
-                (cons "fields"
-                      (list (cons "summary" "Test Feature")
-                            (cons "issuetype" (list (cons "name" "Feature")))
-                            (cons "attachment"
-                                  (list
-                                   (list (cons "filename" "screenshot.png")
-                                         (cons "content" "https://example.com/attaches/screenshot.png")
-                                         (cons "size" 12345))
-                                   (list (cons "filename" "document.pdf")
-                                         (cons "content" "https://example.com/attaches/document.pdf")
-                                         (cons "size" 67890)))))))))
-    (let ((ticket (org-tickets--parse-jira-issue jira-response)))
-      (should (string= (org-tickets--ticket-key ticket) "PROJ-100"))
-      (should (org-tickets--ticket-attachments ticket))
-      (should (= (length (org-tickets--ticket-attachments ticket)) 2))
-      (let ((att1 (car (org-tickets--ticket-attachments ticket))))
-        (should (string= (cdr (assoc 'filename att1)) "screenshot.png"))
-        (should (string= (cdr (assoc 'url att1)) "https://example.com/attaches/screenshot.png"))
-        (should (= (cdr (assoc 'size att1)) 12345))))))
+          (org-tickets-test--json
+           "{\"id\": \"12345\", \"key\": \"PROJ-100\",
+             \"fields\": {\"summary\": \"Test Feature\",
+               \"issuetype\": {\"name\": \"Feature\"},
+               \"attachment\": [
+                 {\"filename\": \"screenshot.png\",
+                  \"content\": \"https://example.com/attaches/screenshot.png\",
+                  \"size\": 12345},
+                 {\"filename\": \"document.pdf\",
+                  \"content\": \"https://example.com/attaches/document.pdf\",
+                  \"size\": 67890}]}}"))
+         (ticket (org-tickets--parse-jira-issue jira-response))
+         (attachments (org-tickets--ticket-attachments ticket))
+         (att1 (car attachments)))
+    (should (string= (org-tickets--ticket-key ticket) "PROJ-100"))
+    (should (= (length attachments) 2))
+    (should (string= (org-tickets--attachment-filename att1) "screenshot.png"))
+    (should (string= (org-tickets--attachment-content-url att1)
+                     "https://example.com/attaches/screenshot.png"))
+    (should (= (org-tickets--attachment-size att1) 12345))))
 
 (ert-deftest org-tickets-test--issue-to-org-with-description-newlines ()
   "Test that issue-to-org preserves description newlines."

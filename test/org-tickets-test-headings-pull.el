@@ -168,10 +168,12 @@
 whole and do not create extra tickets."
   (let* ((ticket (org-tickets-test--ticket-record "Story" "S" "*** H\n\nbody"))
          (text (progn (setf (org-tickets--ticket-attachments ticket)
-                            (list (list (cons 'filename "a.png")
-                                        (cons 'url "https://x.example/a.png"))))
+                            (org-tickets-test--json
+                             "[{\"filename\":\"a.png\",\"content\":\"https://x.example/a.png\"}]"))
                       (org-tickets-test--imported-buffer (list ticket)))))
     (should (equal (mapcar #'car (org-tickets-test--parse-tickets text)) '("S")))
+    (should (string-match-p (regexp-quote "- a.png [[https://x.example/a.png][a.png]]")
+                            text))
     (should (string-prefix-p "*** H\n\nbody"
                              (org-tickets-test--description-of text "S")))))
 

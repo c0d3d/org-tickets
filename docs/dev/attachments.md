@@ -26,6 +26,21 @@ This wrapper (in `org-tickets-attachments.el`) disables `org-attach-use-inherita
 
 All code that needs an attachment directory must call this wrapper. Never call `org-attach-dir` directly.
 
+## Attachment Metadata Shape
+
+Attachments travel everywhere as the **raw Jira metadata alists** from the
+issue's `attachment` field (symbol keys from json.el: `id`, `filename`,
+`content`, `size`, `created`, `mediaApiFileId`) — sync phase 1, the
+description builder, and the ticket record's `attachments` slot on import all
+hold the same shape. `org-tickets--issue-attachments` (org-tickets-api.el)
+extracts the list from an issue response.
+
+Never read attachment keys directly. Use the accessors in
+`org-tickets-core.el` (core so `convert.el` and `import.el` can use them
+without requiring `attachments.el`): `org-tickets--attachment-filename`,
+`-id`, `-content-url`, `-size`, `-created`, `-media-id`. They go through
+`org-tickets--alist-get`, so string-key alists work too.
+
 ## Attachment Flow
 
 ### Upload (org → Jira)
