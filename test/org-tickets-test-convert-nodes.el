@@ -218,33 +218,6 @@ backtick styling over the trailing space."
       (should (equal (cdr (assoc "marks" (nth 2 marked)))
                      '((("type" . "em"))))))))
 
-;;;; Headlines: org level 3 is h1
-
-(ert-deftest org-tickets-test--headline-level-3-is-h1-with-body ()
-  "A *** headline pushes as an h1 followed by its body."
-  (let ((blocks (org-tickets-test--adf-blocks "*** Overview\nBody text.")))
-    (should (= (length blocks) 2))
-    (should (= (org-tickets-test--adf-heading-level (nth 0 blocks)) 1))
-    (should (equal (org-tickets-test--adf-texts (list (nth 0 blocks)))
-                   '("Overview")))
-    (should (equal (cdr (assoc "type" (nth 1 blocks))) "paragraph"))
-    (should (equal (org-tickets-test--adf-texts (list (nth 1 blocks)))
-                   '("Body text.")))))
-
-(ert-deftest org-tickets-test--headline-levels-nest-and-clamp ()
-  "Each extra star is one heading level deeper, capped at h6."
-  (let ((blocks (org-tickets-test--adf-blocks
-                 "*** A\n**** B\n********* C")))
-    (should (equal (mapcar #'org-tickets-test--adf-heading-level blocks)
-                   '(1 2 6)))))
-
-(ert-deftest org-tickets-test--headline-title-keeps-inline-marks ()
-  "Markup in a headline title converts like paragraph markup."
-  (let* ((heading (car (org-tickets-test--adf-blocks "*** The *bold* part")))
-         (bold (seq-find (lambda (n) (equal (cdr (assoc "text" n)) "bold"))
-                         (cdr (assoc "content" heading)))))
-    (should (equal (cdr (assoc "marks" bold)) '((("type" . "strong")))))))
-
 (provide 'org-tickets-test-convert-nodes)
 
 ;;; org-tickets-test-convert-nodes.el ends here

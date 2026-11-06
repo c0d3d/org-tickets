@@ -5,88 +5,7 @@
 (require 'org)
 (require 'org-element)
 
-;; Load the main library
 (require 'org-tickets)
-
-;;;; Tests for BLOCKED-BY → BLOCKS auto-population
-
-(ert-deftest org-tickets-test--blocked-by-populates-blocks-in-org ()
-  "Test that BLOCKED-BY on a story auto-populates BLOCKS on the target ticket.
-When Story PROJ-200 has BLOCKED-BY: PROJ-100, then PROJ-100 should get
-BLOCKS: PROJ-200 in its org properties."
-  (with-temp-buffer
-    (insert "* Parent Feature
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-100
-:BLOCKS:
-:END:
-** Child Story
-:PROPERTIES:
-:JIRA_TYPE: Story
-:JIRA_KEY: PROJ-200
-:BLOCKED-BY: PROJ-100
-:END:
-")
-    (org-mode)
-    (let ((doc (org-tickets--parse-document)))
-      ;; Resolve blocked-by → blocks in org buffer
-      (org-tickets--resolve-blocked-by-in-org doc)
-      ;; Verify PROJ-100 now has BLOCKS containing PROJ-200
-      (goto-char (point-min))
-      (re-search-forward "PROJ-100" nil t)
-      (let ((blocks (org-entry-get (point) "BLOCKS")))
-        (should blocks)
-        (should (string-match-p "PROJ-200" blocks))))))
-
-(ert-deftest org-tickets-test--blocked-by-populates-blocks-idempotent ()
-  "Test that resolving BLOCKED-BY twice doesn't create duplicate BLOCKS entries."
-  (with-temp-buffer
-    (insert "* Parent Feature
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-100
-:BLOCKS:
-:END:
-** Child Story
-:PROPERTIES:
-:JIRA_TYPE: Story
-:JIRA_KEY: PROJ-200
-:BLOCKED-BY: PROJ-100
-:END:
-")
-    (org-mode)
-    (let ((doc (org-tickets--parse-document)))
-      ;; Resolve twice
-      (org-tickets--resolve-blocked-by-in-org doc)
-      ;; Re-parse to get updated state
-      (let ((doc2 (org-tickets--parse-document)))
-        (org-tickets--resolve-blocked-by-in-org doc2))
-      ;; PROJ-100 BLOCKS should contain PROJ-200 exactly once
-      (goto-char (point-min))
-      (re-search-forward "PROJ-100" nil t)
-      (let ((blocks (org-entry-get (point) "BLOCKS")))
-        (should blocks)
-        ;; Count occurrences of PROJ-200
-        (let ((count 0)
-              (start 0))
-          (while (string-match "PROJ-200" blocks start)
-            (setq count (1+ count))
-            (setq start (match-end 0)))
-          (should (= count 1)))))))
-
-(ert-deftest org-tickets-test--create-link-sends-correct-direction ()
-  "Test that org-tickets--async-create-link sends inwardIssue=blocker, outwardIssue=blocked.
-In the Jira POST API, inwardIssue is the blocker and outwardIssue is the blocked.
-This matches the GET response where outwardIssue on ticket X means X blocks it."
-  (let ((requests nil))
-    (org-tickets-test--with-stubs ((org-tickets--async-request
-                                 (org-tickets-test--fake-jira-handler :log requests)))
-      (org-tickets--async-create-link "PROJ-100" "PROJ-200" "Blocks" #'ignore))
-    ;; PROJ-100 is the blocker (inwardIssue in POST)
-    ;; PROJ-200 is the blocked (outwardIssue in POST)
-    (should (equal (org-tickets-test--logged-links requests)
-                   '(("PROJ-100" "PROJ-200" "Blocks"))))))
 
 (ert-deftest org-tickets-test--sync-ticket-links-handles-blocked-by ()
   "Test that async-sync-ticket-links creates links from BLOCKED-BY relationships.
@@ -162,17 +81,19 @@ This verifies the sync path works from struct data alone, not buffer mutations."
     (should (member (list "PROJ-300" "PROJ-200" "Blocks") links))))
 
 (ert-deftest org-tickets-test--create-link-inward-is-blocker ()
-  "Regression: inwardIssue must be the blocker, outwardIssue the blocked.
-This matches GET semantics: viewing ticket X with outwardIssue=Y means X blocks Y.
-So if A blocks B: inwardIssue=A, outwardIssue=B."
+  "Creating a Blocks link POSTs issueLink with inwardIssue the blocker.
+This matches GET semantics: viewing ticket X with outwardIssue=Y means X
+blocks Y.  So if A blocks B: inwardIssue=A, outwardIssue=B."
   (let ((requests nil))
     (org-tickets-test--with-stubs ((org-tickets--async-request
                                  (org-tickets-test--fake-jira-handler :log requests)))
       (org-tickets--async-create-link "BLOCKER-1" "BLOCKED-2" "Blocks" #'ignore))
-    ;; inwardIssue = the blocker, outwardIssue = the blocked
+    (should (equal (butlast (car requests)) '("POST" "/rest/api/3/issueLink")))
+    (should (= (length requests) 1))
     (let ((data (nth 2 (car requests))))
       (should (string= (cdr (assoc "key" (cdr (assoc "inwardIssue" data)))) "BLOCKER-1"))
-      (should (string= (cdr (assoc "key" (cdr (assoc "outwardIssue" data)))) "BLOCKED-2")))))
+      (should (string= (cdr (assoc "key" (cdr (assoc "outwardIssue" data)))) "BLOCKED-2"))
+      (should (equal (cdr (assoc "name" (cdr (assoc 'type data)))) "Blocks")))))
 
 (ert-deftest org-tickets-test--external-parent-creates-blocks-link ()
   "Test that a Story with PARENT referencing an external ticket creates a Blocks link.
@@ -200,58 +121,6 @@ PROJ-500 is not in the buffer, but the Story should still fire a link to it."
           ;; Should create a "Blocks" link from PROJ-200 to PROJ-500
           (should (member (list "PROJ-200" "PROJ-500" "Blocks") created-links)))))))
 
-(ert-deftest org-tickets-test--due-date-inherited-from-external-parent ()
-  "A parent absent from the buffer supplies its due date from Jira."
-  (org-tickets-test--with-stubs
-      ((org-tickets--get-ticket
-        (lambda (_key) (org-tickets-test--make-get-response nil "2026-11-01"))))
-    (with-temp-buffer
-      (insert "* My Story
-:PROPERTIES:
-:JIRA_TYPE: Story
-:JIRA_KEY: PROJ-200
-:PARENT: PROJ-500
-:END:
-")
-      (org-mode)
-      (org-tickets--inherit-due-date "PROJ-200" "PROJ-500")
-      (goto-char (point-min))
-      (re-search-forward "PROJ-200" nil t)
-      (should (equal (org-entry-get (point) "DUE_DATE") "2026-11-01")))))
-
-(ert-deftest org-tickets-test--due-date-inheritance-external-parent-without-date ()
-  "An external parent with no due date in Jira leaves the child unset."
-  (org-tickets-test--with-stubs
-      ((org-tickets--get-ticket (lambda (_key) (org-tickets-test--make-get-response))))
-    (with-temp-buffer
-      (insert "* My Story
-:PROPERTIES:
-:JIRA_TYPE: Story
-:JIRA_KEY: PROJ-200
-:PARENT: PROJ-500
-:END:
-")
-      (org-mode)
-      (org-tickets--inherit-due-date "PROJ-200" "PROJ-500")
-      (goto-char (point-min))
-      (re-search-forward "PROJ-200" nil t)
-      (should-not (org-entry-get (point) "DUE_DATE")))))
-
-(ert-deftest org-tickets-test--invalid-parent-key-rejected ()
-  "Test that an invalid PARENT value is ignored during parsing."
-  (with-temp-buffer
-    (insert "* My Story
-:PROPERTIES:
-:JIRA_TYPE: Story
-:JIRA_KEY: PROJ-200
-:PARENT: not-a-key
-:END:
-")
-    (org-mode)
-    (let* ((doc (org-tickets--parse-document))
-           (story (car (org-tickets--doc-children doc))))
-      (should-not (org-tickets--ticket-parent story)))))
-
 (ert-deftest org-tickets-test--links-fire-for-newly-created-ticket ()
   "Phase-2 link sync re-reads the key the buffer just received, so new
 tickets get their links on the FIRST sync (they were silently skipped)."
@@ -275,6 +144,7 @@ tickets get their links on the FIRST sync (they were silently skipped)."
       (should (member '("P-2" "P-1" "Blocks") links)))))
 
 (ert-deftest org-tickets-test--link-failures-are-logged ()
+  "A failed link creation is reported through `message'."
   (with-temp-buffer
     (org-mode)
     (insert "* S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"

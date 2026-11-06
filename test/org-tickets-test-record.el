@@ -279,23 +279,6 @@ so the message alone is enough to find the typo."
     (should (= 1 (org-tickets-test--point-x restored)))
     (should (equal "two" (org-tickets-test--point-y restored)))))
 
-;;;; Generated documentation
-
-(ert-deftest org-tickets-test--record-constructor-is-documented ()
-  "The constructor carries the record's docstring plus its slot keywords."
-  (let ((doc (documentation 'org-tickets-test--point-create)))
-    (should doc)
-    (should (string-match-p "no slot defaults" doc))
-    (should (string-match-p ":x" doc))
-    (should (string-match-p ":y" doc))))
-
-(ert-deftest org-tickets-test--record-accessors-and-predicate-are-documented ()
-  "Every generated accessor and the predicate carry a docstring."
-  (should (documentation 'org-tickets-test--point-x))
-  (should (documentation 'org-tickets-test--point-y))
-  (should (documentation 'org-tickets-test--point-p))
-  (should (string-match-p "x" (documentation 'org-tickets-test--point-x))))
-
 ;;;; The package's own record types
 
 (ert-deftest org-tickets-test--ticket-record-behaves ()

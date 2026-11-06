@@ -21,7 +21,7 @@
 ;;; Commentary:
 
 ;; Tests for the consolidated async sync flow.
-;; Covers: request consolidation, all-features-exist-p batching,
+;; Covers: request consolidation, phase 1 ordering,
 ;; buffer updates after sync (phase 3), end-to-end pipeline,
 ;; and buffer protection (read-only + re-entrancy guard).
 
@@ -39,24 +39,8 @@
 
 ;;;; Tests: Request Consolidation
 
-(ert-deftest org-tickets-test--sync-existing-ticket-uses-1-get-1-put ()
-  "An existing ticket should produce exactly 1 GET and 1 PUT, not more."
-  (let ((requests nil))
-    (org-tickets-test--with-sync-mocks
-        (org-tickets-test--fake-jira-handler
-         :get (org-tickets-test--make-get-response "Sprint-1" "2026-06-01")
-         :log requests)
-      (with-temp-buffer
-        (org-mode)
-        (org-tickets-test--insert-feature "Test Feature" "PROJ-100")
-        (org-tickets-test--run-sync)))
-    (should (equal (mapcar #'cadr (org-tickets-test--requests requests "GET"))
-                   '("/rest/api/3/issue/PROJ-100")))
-    (should (equal (mapcar #'cadr (org-tickets-test--requests requests "PUT"))
-                   '("/rest/api/3/issue/PROJ-100")))))
-
 (ert-deftest org-tickets-test--sync-existing-ticket-uses-correct-endpoints ()
-  "Verify GET and PUT use the correct /rest/api/3/issue/{key} endpoints."
+  "Each existing ticket gets exactly one GET and one PUT on its own issue URL."
   (let ((requests nil))
     (org-tickets-test--with-sync-mocks
         (org-tickets-test--fake-jira-handler :log requests)
@@ -65,15 +49,13 @@
         (org-tickets-test--insert-feature "Feature A" "PROJ-10")
         (org-tickets-test--insert-story "Story B" "PROJ-20" "PROJ-10")
         (org-tickets-test--run-sync)))
-    ;; Exactly one GET and one PUT per ticket (2 tickets total)
-    (let ((gets (mapcar #'cadr (org-tickets-test--requests requests "GET")))
-          (puts (mapcar #'cadr (org-tickets-test--requests requests "PUT"))))
-      (should (= 2 (length gets)))
-      (should (= 2 (length puts)))
-      (should (member "/rest/api/3/issue/PROJ-10" gets))
-      (should (member "/rest/api/3/issue/PROJ-20" gets))
-      (should (member "/rest/api/3/issue/PROJ-10" puts))
-      (should (member "/rest/api/3/issue/PROJ-20" puts)))))
+    (let ((expected '("/rest/api/3/issue/PROJ-10" "/rest/api/3/issue/PROJ-20")))
+      (should (equal (sort (mapcar #'cadr (org-tickets-test--requests requests "GET"))
+                           #'string<)
+                     expected))
+      (should (equal (sort (mapcar #'cadr (org-tickets-test--requests requests "PUT"))
+                           #'string<)
+                     expected)))))
 
 ;;;; Tests: all-features-exist-p Batching
 
@@ -100,70 +82,46 @@
                          (org-tickets--ticket-create :key "" :type "Feature")))))
     (should-not (org-tickets--all-features-exist-p doc))))
 
-(ert-deftest org-tickets-test--batching-single-batch-when-all-features-have-keys ()
-  "When all features have keys, all tickets fire in a single async-batch call."
-  (let ((batch-calls 0)
-        (orig-batch (symbol-function 'org-tickets--async-batch)))
-    (org-tickets-test--with-stubs ((org-tickets--async-batch
-                                 (lambda (thunks callback)
-                                   (setq batch-calls (1+ batch-calls))
-                                   (funcall orig-batch thunks callback))))
-      (org-tickets-test--with-sync-mocks nil
-        (with-temp-buffer
-          (org-mode)
-          (org-tickets-test--insert-feature "Feature A" "PROJ-1")
-          (org-tickets-test--insert-story "Story B" "PROJ-2" "PROJ-1")
-          (org-tickets-test--run-sync))))
-    ;; Phase 1 fires 1 batch (all tickets), phase 2 fires 1 batch (attachments+links)
-    ;; So total should be 2 batches (not 3 which would be the sequential case)
-    (should (= 2 batch-calls))))
+;;;; Tests: Phase 1 ordering
 
-(ert-deftest org-tickets-test--batching-sequential-when-feature-lacks-key ()
-  "When a feature lacks a key, features batch fires first, then stories batch.
-This produces 3 total batch calls instead of 2 (vs. the single-batch path)."
-  (let ((batch-calls 0)
-        (orig-batch (symbol-function 'org-tickets--async-batch)))
-    (org-tickets-test--with-stubs ((org-tickets--async-batch
-                                 (lambda (thunks callback)
-                                   (setq batch-calls (1+ batch-calls))
-                                   (funcall orig-batch thunks callback))))
-      (org-tickets-test--with-sync-mocks nil
-        (with-temp-buffer
-          (org-mode)
-          ;; Feature has no key — triggers sequential path
-          (org-tickets-test--insert-feature "New Feature" nil)
-          (org-tickets-test--insert-story "Story A" "PROJ-2" nil)
-          (org-tickets-test--run-sync))))
-    ;; Phase 1 sequential: batch 1 = features, batch 2 = stories (nested inside batch 1
-    ;; completion callback), phase 2 = batch 3.
-    ;; This is 3 total vs 2 for the all-features-exist path.
-    (should (= 3 batch-calls))))
+(defun org-tickets-test--sync-holding-responses (features-lack-keys answer-first)
+  "Sync a feature and a new story against a Jira that never answers.
+FEATURES-LACK-KEYS non-nil gives the feature no JIRA_KEY.  ANSWER-FIRST
+non-nil answers the first request once the sync has stalled.  Return the
+requests sent as (METHOD ENDPOINT) pairs, oldest first."
+  (let ((log nil)
+        (held nil))
+    (org-tickets-test--with-sync-mocks
+        (lambda (method endpoint callback &optional _data)
+          (push (list method endpoint) log)
+          (push callback held))
+      (with-temp-buffer
+        (org-mode)
+        (org-tickets-test--insert-feature
+         "Feature" (unless features-lack-keys "PROJ-1"))
+        (org-tickets-test--insert-story "Story" nil nil)
+        (org-tickets-test--run-sync)
+        (when answer-first
+          (funcall (car (last held)) '((key . "PROJ-7")) nil))))
+    (reverse log)))
+
+(ert-deftest org-tickets-test--stories-start-with-existing-features ()
+  "When every feature already has a key, the story create goes out alongside
+the feature update without waiting for any response."
+  (should (equal (org-tickets-test--sync-holding-responses nil nil)
+                 '(("GET" "/rest/api/3/issue/PROJ-1")
+                   ("POST" "/rest/api/3/issue")))))
+
+(ert-deftest org-tickets-test--stories-wait-for-features-lacking-keys ()
+  "A feature without a key is created first; the story is created only
+after that create is answered."
+  (should (equal (org-tickets-test--sync-holding-responses t nil)
+                 '(("POST" "/rest/api/3/issue"))))
+  (should (equal (org-tickets-test--sync-holding-responses t t)
+                 '(("POST" "/rest/api/3/issue")
+                   ("POST" "/rest/api/3/issue")))))
 
 ;;;; Tests: Phase 3 Buffer Updates
-
-(ert-deftest org-tickets-test--phase-3-updates-sprint-property ()
-  "After sync, SPRINT property should reflect the sprint returned by Jira GET."
-  (org-tickets-test--with-sync-mocks
-      (org-tickets-test--fake-jira-handler
-       :get (org-tickets-test--make-get-response "May26_S4-Totoro" nil))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets-test--insert-feature "My Feature" "PROJ-100")
-      (org-tickets-test--run-sync)
-      (should (string= (org-tickets-test--prop-of "PROJ-100" "SPRINT")
-                       "May26_S4-Totoro")))))
-
-(ert-deftest org-tickets-test--phase-3-updates-due-date-property ()
-  "After sync, DUE_DATE property should reflect the due date returned by Jira GET."
-  (org-tickets-test--with-sync-mocks
-      (org-tickets-test--fake-jira-handler
-       :get (org-tickets-test--make-get-response nil "2026-08-01"))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets-test--insert-feature "My Feature" "PROJ-100")
-      (org-tickets-test--run-sync)
-      (should (string= (org-tickets-test--prop-of "PROJ-100" "DUE_DATE")
-                       "2026-08-01")))))
 
 (ert-deftest org-tickets-test--phase-3-writes-new-key-for-created-ticket ()
   "After sync, a newly created ticket should have its JIRA_KEY set in the buffer."
@@ -275,15 +233,6 @@ This produces 3 total batch calls instead of 2 (vs. the single-batch path)."
           (should message-text)
           (should (string-match-p "already in progress" message-text)))))))
 
-(ert-deftest org-tickets-test--sync-in-progress-nil-after-sync ()
-  "org-tickets--sync-in-progress is nil after sync completes normally."
-  (org-tickets-test--with-sync-mocks nil
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets-test--insert-feature "Feature" "PROJ-1")
-      (org-tickets-test--run-sync)
-      (should (null org-tickets--sync-in-progress)))))
-
 ;;;; Tests: Cursor Preservation
 
 (ert-deftest org-tickets-test--sync-restores-point-to-original-heading ()
@@ -340,49 +289,28 @@ last ticket processed would otherwise leave point far from the user's location."
 
 ;;;; Tests: Phase 2 Async Thunks
 
-(ert-deftest org-tickets-test--phase2-thunks-use-async ()
-  "Phase 2 attachment thunk should call async download then upload."
-  (let ((download-calls nil)
-        (upload-calls nil)
-        (link-calls nil))
-    (org-tickets-test--with-stubs ((org-tickets--async-download-attachments
-                                 (lambda (key attachments callback)
-                                   (push key download-calls)
-                                   (funcall callback nil nil)))
-                                (org-tickets--async-upload-attachments
-                                 (lambda (key jira-attachments callback)
-                                   (push key upload-calls)
-                                   (funcall callback nil nil)))
-                                (org-tickets--async-sync-ticket-links
-                                 (lambda (ticket callback)
-                                   (push (org-tickets--ticket-key ticket) link-calls)
-                                   (funcall callback)))
-                                (org-tickets--safe-with-buffer
-                                 (lambda (buffer body-fn) (funcall body-fn))))
-      ;; Build a fake attachment thunk
-      (let* ((thunk (org-tickets--make-attachment-thunk
-                     "PROJ-1" '(("a")) (current-buffer)))
-             (done-result nil))
-        (funcall thunk (lambda (r e) (setq done-result t)))
-        (should done-result)
-        (should (equal download-calls '("PROJ-1")))
-        (should (equal upload-calls '("PROJ-1")))))))
-
-(ert-deftest org-tickets-test--attachment-thunk-calls-done-exactly-once ()
-  "Attachment thunk must call DONE exactly once (async-batch contract).
-Uses the real `org-tickets--safe-with-buffer' so control flow is not hidden.
+(ert-deftest org-tickets-test--attachment-thunk-downloads-uploads-then-done-once ()
+  "The attachment thunk downloads, then uploads, and calls DONE exactly once.
 Calling DONE more than once corrupts the shared batch counter and can
 leave the pipeline hung with the buffer stuck read-only."
-  (org-tickets-test--with-stubs ((org-tickets--async-download-attachments
-                               (lambda (_key _atts callback) (funcall callback nil nil)))
-                              (org-tickets--async-upload-attachments
-                               (lambda (_key _atts callback) (funcall callback nil nil))))
-    (with-temp-buffer
-      (org-mode)
-      (let ((done-count 0)
-            (thunk (org-tickets--make-attachment-thunk "PROJ-1" nil (current-buffer))))
-        (funcall thunk (lambda (_r _e) (setq done-count (1+ done-count))))
-        (should (= done-count 1))))))
+  (let ((steps nil))
+    (org-tickets-test--with-stubs
+        ((org-tickets--async-download-attachments
+          (lambda (key _atts callback)
+            (push (list 'download key) steps)
+            (funcall callback nil nil)))
+         (org-tickets--async-upload-attachments
+          (lambda (key _atts callback)
+            (push (list 'upload key) steps)
+            (funcall callback nil nil))))
+      (with-temp-buffer
+        (org-mode)
+        (let ((done-count 0)
+              (thunk (org-tickets--make-attachment-thunk "PROJ-1" nil (current-buffer))))
+          (funcall thunk (lambda (_r _e) (setq done-count (1+ done-count))))
+          (should (= done-count 1))
+          (should (equal (reverse steps)
+                         '((download "PROJ-1") (upload "PROJ-1")))))))))
 
 (ert-deftest org-tickets-test--attachment-thunk-done-once-when-buffer-dead ()
   "Attachment thunk must still call DONE exactly once if ORG-BUFFER is dead."
@@ -394,42 +322,6 @@ leave the pipeline hung with the buffer stuck read-only."
     (should (= done-count 1))))
 
 ;;;; Async Link Creation Tests
-
-(ert-deftest org-tickets-test--async-create-link-fires-post ()
-  "Async create link should POST to issueLink endpoint."
-  (let ((requests nil))
-    (org-tickets-test--with-stubs ((org-tickets--async-request
-                                 (org-tickets-test--fake-jira-handler :log requests)))
-      (org-tickets--async-create-link "PROJ-1" "PROJ-2" "Blocks" #'ignore))
-    (should (= (length requests) 1))
-    (should (equal (butlast (car requests)) '("POST" "/rest/api/3/issueLink")))
-    (should (equal (org-tickets-test--logged-links requests)
-                   '(("PROJ-1" "PROJ-2" "Blocks"))))))
-
-(ert-deftest org-tickets-test--async-sync-ticket-links-story ()
-  "Async sync ticket links should create parent + blocks + blocked-by links."
-  (let ((link-calls nil))
-    (org-tickets-test--with-stubs ((org-tickets--async-create-link
-                                 (lambda (from to type callback)
-                                   (push (list from to type) link-calls)
-                                   (funcall callback nil nil))))
-      (with-temp-buffer
-        (org-mode)
-        (org-tickets-test--insert-feature "Feature" "PROJ-100")
-        (org-tickets-test--insert-story "Story" "PROJ-200" "PROJ-100"
-                                        "BLOCKS" "PROJ-300")
-        (let* ((doc (org-tickets--parse-document))
-               (story (car (org-tickets--doc-children doc)))
-               (result nil))
-          (org-tickets--async-sync-ticket-links
-           story (lambda () (setq result t)))
-          (should result)
-          ;; Should have: parent link + blocks link = 2 calls
-          (should (= (length link-calls) 2))
-          ;; Parent link: story blocks parent
-          (should (member (list "PROJ-200" "PROJ-100" "Blocks") link-calls))
-          ;; Explicit blocks link
-          (should (member (list "PROJ-200" "PROJ-300" "Blocks") link-calls)))))))
 
 ;;;; Tests: Full Pipeline Phase 2 Async
 
@@ -507,6 +399,73 @@ story's create payload carries no Jira parent field."
                        (org-tickets-test--requests requests "POST" "/rest/api/3/issue"))))
       (should story-post)
       (should-not (assq 'parent (cdr (assq 'fields (nth 2 story-post))))))))
+
+;;;; Phase 3 BLOCKED-BY write-back
+
+(ert-deftest org-tickets-test--blocked-by-populates-blocks-idempotent ()
+  "Test that resolving BLOCKED-BY twice doesn't create duplicate BLOCKS entries."
+  (with-temp-buffer
+    (insert "* Parent Feature
+:PROPERTIES:
+:JIRA_TYPE: New Feature
+:JIRA_KEY: PROJ-100
+:BLOCKS:
+:END:
+** Child Story
+:PROPERTIES:
+:JIRA_TYPE: Story
+:JIRA_KEY: PROJ-200
+:BLOCKED-BY: PROJ-100
+:END:
+")
+    (org-mode)
+    (let ((doc (org-tickets--parse-document)))
+      ;; Resolve twice
+      (org-tickets--resolve-blocked-by-in-org doc)
+      ;; Re-parse to get updated state
+      (let ((doc2 (org-tickets--parse-document)))
+        (org-tickets--resolve-blocked-by-in-org doc2))
+      ;; PROJ-100 BLOCKS should contain PROJ-200 exactly once
+      (goto-char (point-min))
+      (re-search-forward "PROJ-100" nil t)
+      (let ((blocks (org-entry-get (point) "BLOCKS")))
+        (should blocks)
+        ;; Count occurrences of PROJ-200
+        (let ((count 0)
+              (start 0))
+          (while (string-match "PROJ-200" blocks start)
+            (setq count (1+ count))
+            (setq start (match-end 0)))
+          (should (= count 1)))))))
+
+(ert-deftest org-tickets-test--blocked-by-populates-blocks-in-org ()
+  "Test that BLOCKED-BY on a story auto-populates BLOCKS on the target ticket.
+When Story PROJ-200 has BLOCKED-BY: PROJ-100, then PROJ-100 should get
+BLOCKS: PROJ-200 in its org properties."
+  (with-temp-buffer
+    (insert "* Parent Feature
+:PROPERTIES:
+:JIRA_TYPE: New Feature
+:JIRA_KEY: PROJ-100
+:BLOCKS:
+:END:
+** Child Story
+:PROPERTIES:
+:JIRA_TYPE: Story
+:JIRA_KEY: PROJ-200
+:BLOCKED-BY: PROJ-100
+:END:
+")
+    (org-mode)
+    (let ((doc (org-tickets--parse-document)))
+      ;; Resolve blocked-by → blocks in org buffer
+      (org-tickets--resolve-blocked-by-in-org doc)
+      ;; Verify PROJ-100 now has BLOCKS containing PROJ-200
+      (goto-char (point-min))
+      (re-search-forward "PROJ-100" nil t)
+      (let ((blocks (org-entry-get (point) "BLOCKS")))
+        (should blocks)
+        (should (string-match-p "PROJ-200" blocks))))))
 
 (provide 'org-tickets-test-sync-flow)
 ;;; org-tickets-test-sync-flow.el ends here

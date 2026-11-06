@@ -100,7 +100,7 @@
                       \"content\":[{\"type\":\"text\",\"text\":\"In\"}]}]}]}"))
                  " *** In")))
 
-(ert-deftest org-tickets-test--headings-pull-heading-text-with-newline-free-title ()
+(ert-deftest org-tickets-test--headings-pull-heading-title-with-leading-stars ()
   "A heading title with leading stars still yields exactly one headline."
   (let ((text (org-tickets-test--pull (org-tickets-test--adf-doc (org-tickets-test--adf-heading 1 "* odd")))))
     (with-temp-buffer
@@ -264,21 +264,24 @@ whole and do not create extra tickets."
 
 ;;;; Full round trips
 
+(defun org-tickets-test--pushed-adf (org-desc)
+  "Return the ADF pushed for ORG-DESC, as the API client would read it back."
+  (org-tickets-test--json
+   (json-encode (org-tickets--build-adf-description org-desc))))
+
 (defun org-tickets-test--assert-fixpoint (type stars org-desc)
   "Assert ORG-DESC on a TYPE ticket at STARS survives push then pull.
 A following Story must keep its own description.
 The ADF pushed from the original and from the pulled buffer must match,
 and the pulled description must parse back unchanged."
-  (let* ((adf (org-tickets-test--json
-                (json-encode (org-tickets--build-adf-description org-desc))))
+  (let* ((adf (org-tickets-test--pushed-adf org-desc))
          (pulled-desc (org-tickets--parse-adf-description adf))
          (text (concat (org-tickets-test--ticket-text stars type "T" "old\n" "P-1")
                        (org-tickets-test--ticket-text "**" "Story" "C" "c\n" "P-2")))
          (pulled (org-tickets-test--pull-into text "P-1" type pulled-desc))
          (reparsed (org-tickets-test--description-of pulled "T")))
     (should (equal reparsed pulled-desc))
-    (should (equal (org-tickets-test--json
-                           (json-encode (org-tickets--build-adf-description reparsed))) adf))
+    (should (equal (org-tickets-test--pushed-adf reparsed) adf))
     (should (equal (org-tickets-test--description-of pulled "C") "c"))))
 
 (defconst org-tickets-test--rich-heading-description

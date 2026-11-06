@@ -184,5 +184,57 @@ Within one command, repeated requests look credentials up once."
         (should (equal (buffer-string)
                        "#+JIRA_ISSUE_TYPES: Story=10001,New Feature=10002\n* H\n"))))))
 
+(ert-deftest org-tickets-test--request-data-is-utf-8-bytes ()
+  "Request bodies are unibyte UTF-8 that decodes back to the original text."
+  (let* ((encoded (org-tickets--encode-request-data
+                   '((summary . "Caf\u00e9 r\u00e9sum\u00e9")
+                     (emoji . "\U0001F389 party \U0001F30D"))))
+         (decoded (json-read-from-string (decode-coding-string encoded 'utf-8))))
+    (should-not (multibyte-string-p encoded))
+    (should (equal (cdr (assq 'summary decoded)) "Caf\u00e9 r\u00e9sum\u00e9"))
+    (should (equal (cdr (assq 'emoji decoded)) "\U0001F389 party \U0001F30D"))))
+
+(ert-deftest org-tickets-test--request-data-nil-is-nil ()
+  "No data means no request body."
+  (should-not (org-tickets--encode-request-data nil)))
+
+(ert-deftest org-tickets-test--api-request-nil-buffer-is-clear-error ()
+  "A request that yields no response buffer signals an error."
+  (org-tickets-test--with-fake-config
+    (org-tickets-test--with-stubs ((url-retrieve-synchronously
+                                 (lambda (&rest _) nil)))
+      (should-error (org-tickets--api-request "GET" "/x")))))
+
+(ert-deftest org-tickets-test--api-request-kills-response-buffer-and-tolerates-percent ()
+  "The sync path must kill its response buffer and never treat the URL
+as a format string (URLs with %20 crashed `message')."
+  (let ((made-buffer nil))
+    (org-tickets-test--with-fake-config
+      (org-tickets-test--with-stubs ((url-retrieve-synchronously
+                                   (lambda (_url &rest _)
+                                     (setq made-buffer (generate-new-buffer " test-http"))
+                                     (with-current-buffer made-buffer
+                                       (insert "HTTP/1.1 200 OK\n\n{\"ok\": true}"))
+                                     made-buffer)))
+        (let ((response (org-tickets--api-request "GET" "/rest/api/3/search?jql=a%20b")))
+          (should (eq (cdr (assq 'ok response)) t))
+          (should-not (buffer-live-p made-buffer)))))))
+
+(ert-deftest org-tickets-test--http-parse-json-body-shapes ()
+  "Blank bodies parse to nil; JSON false parses to :json-false."
+  (should (null (org-tickets--http-parse-json-body "")))
+  (should (null (org-tickets--http-parse-json-body "  \n ")))
+  (let ((parsed (org-tickets--http-parse-json-body "{\"key\": \"P-1\", \"ok\": false}")))
+    (should (equal (cdr (assq 'key parsed)) "P-1"))
+    (should (eq (cdr (assq 'ok parsed)) :json-false))))
+
+(ert-deftest org-tickets-test--http-split-response-basic ()
+  "A raw HTTP response splits into its status line and body."
+  (with-temp-buffer
+    (insert "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"a\": 1}")
+    (let ((parsed (org-tickets--http-split-response)))
+      (should (string-match-p "200 OK" (plist-get parsed :status)))
+      (should (equal (string-trim (plist-get parsed :body)) "{\"a\": 1}")))))
+
 (provide 'org-tickets-test-api)
 ;;; org-tickets-test-api.el ends here

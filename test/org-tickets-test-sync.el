@@ -1,73 +1,21 @@
-;;; org-tickets-test-sync.el --- Tests for org-tickets sync and import functions  -*- lexical-binding: t; -*-
+;;; org-tickets-test-sync.el --- Tests for org-tickets org property helpers and ticket payloads  -*- lexical-binding: t; -*-
 
 (require 'ert)
 (require 'org)
 (require 'org-element)
 
-;; Load the main library
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-;;;; API Response Tests
+;;;; JSON responses
 
-(ert-deftest org-tickets-test--api-response-key-extraction ()
-  "Test that the issue key is read from a parsed create response.
-Regression test: json.el produces symbol keys, so a string-key `assoc'
-on the response returns nil; `org-tickets--alist-get' must handle it."
+(ert-deftest org-tickets-test--alist-get-reads-symbol-keyed-json ()
+  "A string key finds its value in a parsed (symbol-keyed) JSON response."
   (let ((api-response (org-tickets-test--json "{\"key\": \"PROJ-123\", \"id\": \"12345\"}")))
     (should (null (assoc "key" api-response)))
     (should (string= (org-tickets--alist-get "key" api-response) "PROJ-123"))))
 
-(ert-deftest org-tickets-test--api-response-parsing ()
-  "Test that API response body is properly parsed and returned.
-This is a regression test - the org-tickets--api-request function was not
-returning the parsed JSON body for successful responses (201 Created, etc).
-It was returning nil even when the response had a valid JSON body."
-  ;; Simulate a successful HTTP response with a JSON body
-  (let ((response-body "{\"key\":\"PROJ-123\",\"id\":\"12345\",\"summary\":\"Test ticket\"}"))
-    ;; Parse the body the same way org-tickets--api-request does
-    (let ((json-object-type 'alist))
-      (let ((parsed (json-read-from-string response-body)))
-        ;; Should get a result (not nil)
-        (should parsed)
-        ;; Body is not empty or whitespace - should be processed
-        (should-not (string-match-p "^[[:space:]]*$" response-body))
-        (should (> (length response-body) 0))
-        ;; The parsed result should contain the key - access via elt since it's a vector of alist
-        (let ((key-entry (elt parsed 0)))
-          (should (string= (cdr key-entry) "PROJ-123")))))))
-
-(ert-deftest org-tickets-test--api-response-body-with-leading-newline ()
-  "Test that API response body with leading newline is properly parsed.
-This is a regression test - the HTTP response body may start with a newline
-character after the headers, which was causing the body to be incorrectly
-treated as empty/whitespace and returning nil instead of the parsed JSON."
-  ;; Simulate a response body that starts with a newline (like after HTTP headers)
-  (let ((response-body "\n{\"key\":\"PROJ-12750\",\"id\":\"108902\"}"))
-    ;; Trim the body like org-tickets--api-request does
-    (let ((trimmed-body (string-trim response-body)))
-      ;; Should not be empty after trimming
-      (should (> (length trimmed-body) 0))
-      (should-not (string-match-p "^[[:space:]]*$" trimmed-body))
-      ;; Should parse correctly
-      (let ((json-object-type 'alist))
-        (let ((parsed (json-read-from-string trimmed-body)))
-          (should parsed)
-          ;; Access the key - parsed is a vector containing alist entries
-          (let ((key-entry (elt parsed 0)))
-            (should (string= (cdr key-entry) "PROJ-12750"))))))))
-
 ;;;; Tests for Org Property Helpers
-
-(ert-deftest org-tickets-test--set-org-ticket-key ()
-  "Test setting JIRA_KEY property in org via the ticket's marker."
-  (with-temp-buffer
-    (org-mode)
-    (insert "* Test\n:PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n")
-    (let ((ticket (car (org-tickets--doc-tickets (org-tickets--parse-document)))))
-      (org-tickets--set-org-ticket-key ticket "PROJ-999")
-      (goto-char (point-min))
-      (should (string= (org-entry-get (point) "JIRA_KEY") "PROJ-999")))))
 
 (ert-deftest org-tickets-test--set-org-ticket-key-targets-exact-heading ()
   "Keys go to the parsed heading itself — never to another entry whose
@@ -165,300 +113,6 @@ existing JIRA_KEY (both happened with the old summary-text search)."
       (org-tickets--update-sizing-label "PROJ-999" 5)
       (should (not (string-match-p "NeedsSizing" (org-entry-get (point) "LABELS")))))))
 
-;;;; Import Tests
-
-(ert-deftest org-tickets-test--issue-to-org-feature ()
-  "Test converting a feature ticket to org heading."
-  (let ((ticket (org-tickets--ticket-create
-                 :key "PROJ-100"
-                 :type "Feature"
-                 :summary "Test Feature"
-                 :description "Feature description"
-                 :fix-version "v1.0"
-                 :labels '("label1" "label2")
-                 :story-points nil
-                 :blocks nil
-                 :blocked-by nil
-                 :parent nil
-                 :attachments nil)))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets--issue-to-org ticket)
-      (goto-char (point-min))
-      ;; Move point to the heading line itself
-      (re-search-forward "^\\* Test Feature" nil t)
-      (goto-char (match-beginning 0))
-      (should (string= (org-entry-get (point) "JIRA_KEY") "PROJ-100"))
-      (should (string= (org-entry-get (point) "JIRA_TYPE") "Feature"))
-      (should (string= (org-entry-get (point) "FIX_VERSION") "v1.0"))
-      (should (string= (org-entry-get (point) "LABELS") "label1,label2")))))
-
-(ert-deftest org-tickets-test--issue-to-org-story ()
-  "Test converting a story ticket to org heading."
-  (let ((ticket (org-tickets--ticket-create
-                 :key "PROJ-200"
-                 :type "Story"
-                 :summary "Test Story"
-                 :description "Story description"
-                 :fix-version "v1.0"
-                 :labels '("NeedsSizing")
-                 :story-points 5
-                 :blocks '("PROJ-300")
-                 :blocked-by '("PROJ-100")
-                 :parent "PROJ-100"
-                 :attachments nil)))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets--issue-to-org ticket)
-      (goto-char (point-min))
-      ;; Move point to the heading line itself
-      (re-search-forward "^\\*\\* Test Story" nil t)
-      (goto-char (match-beginning 0))
-      (should (string= (org-entry-get (point) "JIRA_KEY") "PROJ-200"))
-      (should (string= (org-entry-get (point) "PARENT") "PROJ-100"))
-      (should (string= (org-entry-get (point) "STORY_POINTS") "5"))
-      (should (string= (org-entry-get (point) "BLOCKS") "PROJ-300"))
-      (should (string= (org-entry-get (point) "BLOCKED-BY") "PROJ-100")))))
-
-;;;; Regression tests for JSON parsing
-
-(ert-deftest org-tickets-test--parse-jira-issue-with-json-lists ()
-  "Test parsing Jira issue when JSON arrays are parsed as lists.
-This tests that fixVersions, labels, and issuelinks are handled correctly
-when JSON array-type is set to \\='list."
-  (let* ((jira-response
-          (org-tickets-test--json "{\"id\": \"12345\", \"key\": \"PROJ-11437\", \"fields\": {\"summary\": \"Test Feature\", \
-    \"issuetype\": {\"name\": \"Feature\"}, \"fixVersions\": [{\"id\": \"11653\", \
-    \"name\": \"Aug2025\", \"description\": \"\", \"archived\": null, \"released\": null}], \
-    \"labels\": [\"label1\", \"label2\"], \"customfield_10016\": 5, \"issuelinks\": [{\"type\": {\"name\": \"Blocks\", \
-    \"outward\": \"blocks\"}, \"outwardIssue\": {\"key\": \"PROJ-200\"}}, {\"type\": {\"name\": \"Blocks\", \
-    \"inward\": \"is blocked by\"}, \"inwardIssue\": {\"key\": \"PROJ-300\"}}]}}")))
-    (let ((ticket (org-tickets--parse-jira-issue jira-response)))
-      (should (string= (org-tickets--ticket-key ticket) "PROJ-11437"))
-      (should (string= (org-tickets--ticket-fix-version ticket) "Aug2025"))
-      (should (equal (org-tickets--ticket-labels ticket) '("label1" "label2")))
-      (should (= (org-tickets--ticket-story-points ticket) 5))
-      (should (member "PROJ-200" (org-tickets--ticket-blocks ticket)))
-      (should (member "PROJ-300" (org-tickets--ticket-blocked-by ticket))))))
-
-;;;; Regression tests for ADF table parsing
-
-;; NOTE: org-tickets-test--parse-adf-table and
-;; org-tickets-test--parse-adf-paragraph-newlines were removed here.  Both
-;; used hand-built cons-shorthand ADF fixtures (e.g. (cons "text" "...")
-;; without a "type" field) that only the deleted old parser tolerated,
-;; and both are now covered by proper-fixture tests against the public
-;; `org-tickets--parse-adf-description' entry point in
-;; org-tickets-test-import.el: table/tableHeader/tableCell coverage lives
-;; in `org-tickets-test--adf-import-table', and paragraph-to-paragraph
-;; double-newline separation lives in
-;; `org-tickets-test--adf-import-doc-blank-line-separation'.
-
-(ert-deftest org-tickets-test--parse-adf-marks-code ()
-  "Test parsing ADF text with code marks."
-  (let ((adf
-         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"code example\", \
-    \"marks\": [{\"type\": \"code\"}]}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "~code example~" result)))))
-
-(ert-deftest org-tickets-test--parse-adf-marks-strong ()
-  "Test parsing ADF text with strong marks."
-  (let ((adf
-         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"bold text\", \
-    \"marks\": [{\"type\": \"strong\"}]}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "\\*bold text\\*" result)))))
-
-(ert-deftest org-tickets-test--parse-adf-marks-emphasis ()
-  "Test parsing ADF text with emphasis marks."
-  (let ((adf
-         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"italic text\", \
-    \"marks\": [{\"type\": \"emphasis\"}]}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "/italic text/" result)))))
-
-(ert-deftest org-tickets-test--parse-adf-marks-em ()
-  "Test parsing ADF text with 'em' mark type (used in export).
-This tests round-trip: export uses 'em', import should also handle 'em'."
-  (let ((adf
-         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"italic text\", \
-    \"marks\": [{\"type\": \"em\"}]}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "/italic text/" result)))))
-
-(ert-deftest org-tickets-test--parse-adf-marks-link ()
-  "Test parsing ADF text with link marks - should produce proper org links."
-  (let ((adf
-         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"click here\", \
-    \"marks\": [{\"type\": \"link\", \"attrs\": {\"href\": \"https://example.com\"}}]}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "\\[\\[https://example\\.com\\]\\[click here\\]\\]" result)))))
-
-(ert-deftest org-tickets-test--parse-adf-media-single ()
-  "Test that mediaSingle with alt falls back to attachment link."
-  (let ((adf
-         (org-tickets-test--json "{\"content\": [{\"type\": \"mediaSingle\", \"attrs\": {\"width\": 800, \"layout\": \"align-start\"}, \
-    \"content\": [{\"type\": \"media\", \"attrs\": {\"type\": \"file\", \"id\": \"abc123\", \
-    \"alt\": \"screenshot.png\", \"collection\": \"\"}}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "\\[\\[attachment:screenshot\\.png\\]\\]" result)))))
-
-(ert-deftest org-tickets-test--parse-adf-table-header ()
-  "Test parsing ADF table with tableHeader elements."
-  (let* ((adf (org-tickets-test--json
-               "{\"content\": [{\"type\": \"table\", \"content\": [
-                  {\"type\": \"tableRow\", \"content\": [
-                    {\"type\": \"tableHeader\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Header 1\"}]}]},
-                    {\"type\": \"tableHeader\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Header 2\"}]}]}]},
-                  {\"type\": \"tableRow\", \"content\": [
-                    {\"type\": \"tableCell\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Cell 1\"}]}]},
-                    {\"type\": \"tableCell\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Cell 2\"}]}]}]}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "Header 1" result))
-      (should (string-match-p "Header 2" result))
-      (should (string-match-p "Cell 1" result))
-      (should (string-match-p "Cell 2" result))
-      (should (string-match-p "|" result)))))
-
-(ert-deftest org-tickets-test--parse-adf-heading-without-attrs ()
-  "Test parsing ADF heading when attrs is absent.
-The importer defaults to level 1, which is an org level-3 headline."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"heading\",
-                       \"content\":[{\"type\":\"text\",\"text\":\"Simple Heading\"}]}]}"))
-                 "*** Simple Heading")))
-
-(ert-deftest org-tickets-test--parse-adf-codeblock-without-attrs ()
-  "Test parsing ADF codeBlock when attrs is absent.
-With no \"attrs\"/\"language\", the src block has no language tag."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"codeBlock\",
-                       \"content\":[{\"type\":\"text\",\"text\":\"some code\"}]}]}"))
-                 "#+BEGIN_SRC\nsome code\n#+END_SRC")))
-
-;;;; Regression tests for attachment parsing
-
-(ert-deftest org-tickets-test--parse-jira-issue-with-attachments ()
-  "Test parsing Jira issue with attachments."
-  (let* ((jira-response
-          (org-tickets-test--json
-           "{\"id\": \"12345\", \"key\": \"PROJ-100\",
-             \"fields\": {\"summary\": \"Test Feature\",
-               \"issuetype\": {\"name\": \"Feature\"},
-               \"attachment\": [
-                 {\"filename\": \"screenshot.png\",
-                  \"content\": \"https://example.com/attaches/screenshot.png\",
-                  \"size\": 12345},
-                 {\"filename\": \"document.pdf\",
-                  \"content\": \"https://example.com/attaches/document.pdf\",
-                  \"size\": 67890}]}}"))
-         (ticket (org-tickets--parse-jira-issue jira-response))
-         (attachments (org-tickets--ticket-attachments ticket))
-         (att1 (car attachments)))
-    (should (string= (org-tickets--ticket-key ticket) "PROJ-100"))
-    (should (= (length attachments) 2))
-    (should (string= (org-tickets--attachment-filename att1) "screenshot.png"))
-    (should (string= (org-tickets--attachment-content-url att1)
-                     "https://example.com/attaches/screenshot.png"))
-    (should (= (org-tickets--attachment-size att1) 12345))))
-
-(ert-deftest org-tickets-test--issue-to-org-with-description-newlines ()
-  "Test that issue-to-org preserves description newlines."
-  (let ((ticket (org-tickets--ticket-create
-                 :key "PROJ-100"
-                 :type "Feature"
-                 :summary "Test Feature"
-                 :description "First paragraph\n\nSecond paragraph"
-                 :fix-version "v1.0"
-                 :labels nil
-                 :story-points nil
-                 :blocks nil
-                 :blocked-by nil
-                 :parent nil
-                 :attachments nil)))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets--issue-to-org ticket)
-      (goto-char (point-min))
-      (re-search-forward "^\\* Test Feature" nil t)
-      (should (re-search-forward "First paragraph" nil t))
-      (should (re-search-forward "Second paragraph" nil t)))))
-
-(ert-deftest org-tickets-test--issue-to-org-no-duplicate-type-prefix ()
-  "Test that issue-to-org strips the type prefix from the summary in the heading.
-
-Jira returns summaries that already include the type prefix (e.g., 'Improvement: Do something').
-The code should strip this prefix so the heading contains only the clean summary text,
-not 'Improvement: Change how portalAPI...' but 'Change how portalAPI...'."
-  (let ((ticket (org-tickets--ticket-create
-                 :key "PROJ-100"
-                 :type "Improvement"
-                 :summary "Improvement: Change how portalAPI access is given to new groups"
-                 :description "Test description"
-                 :fix-version "v1.0"
-                 :labels nil
-                 :story-points nil
-                 :blocks nil
-                 :blocked-by nil
-                 :parent nil
-                 :attachments nil)))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets--issue-to-org ticket)
-      (goto-char (point-min))
-      ;; The heading should be "* Change how portalAPI..." (prefix stripped)
-      (should (re-search-forward "^\\* Change how portalAPI" nil t)))))
-
-(ert-deftest org-tickets-test--issue-to-org-story-no-duplicate-prefix ()
-  "Test that Story tickets strip the type prefix from the summary in the heading."
-  (let ((ticket (org-tickets--ticket-create
-                 :key "PROJ-200"
-                 :type "Story"
-                 :summary "Story: User wants to login"
-                 :description "Story description"
-                 :fix-version "v1.0"
-                 :labels nil
-                 :story-points 5
-                 :blocks nil
-                 :blocked-by nil
-                 :parent nil
-                 :attachments nil)))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets--issue-to-org ticket)
-      (goto-char (point-min))
-      ;; The heading should be "** User wants to login" (prefix stripped)
-      (should (re-search-forward "^\\*\\* User wants to login" nil t)))))
-
-(ert-deftest org-tickets-test--issue-to-org-nil-type ()
-  "Test that issue-to-org handles nil type gracefully.
-If type is nil, should not error on regexp-quote."
-  (let ((ticket (org-tickets--ticket-create
-                 :key "PROJ-300"
-                 :type nil
-                 :summary "Some summary without type prefix"
-                 :description "Test description"
-                 :fix-version "v1.0"
-                 :labels nil
-                 :story-points nil
-                 :blocks nil
-                 :blocked-by nil
-                 :parent nil
-                 :attachments nil)))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets--issue-to-org ticket)
-      (goto-char (point-min))
-      ;; Should create a heading (using catch-all _ branch)
-      (should (re-search-forward "^\\* " nil t))
-      ;; Should have the summary text
-      (should (re-search-forward "Some summary without type prefix" nil t)))))
-
 (defun org-tickets-test--story-sizing-request (points)
   "Run `org-tickets-update-story-sizing' with POINTS on story P-1.
 Return the (METHOD ENDPOINT BODY) of the single request sent, where BODY
@@ -524,13 +178,8 @@ records exactly what create sent (not always NeedsSizing)."
     (should (re-search-forward "^\\*\\*\\* My story$" nil t))
     (should (equal (org-entry-get (point) "LABELS") "lbl1,lbl2"))))
 
-(ert-deftest org-tickets-test--validate-fix-version-is-anchored ()
-  (should (org-tickets--validate-fix-version "Aug2026"))
-  (should-not (org-tickets--validate-fix-version "Aug2026-draft"))
-  (should-not (org-tickets--validate-fix-version "xxAug2026"))
-  (should-not (org-tickets--validate-fix-version "Sep2026")))
-
 (ert-deftest org-tickets-test--sync-reset-recovers-stuck-buffer ()
+  "Resetting a stuck sync unlocks the buffer and clears the guard."
   (with-temp-buffer
     (org-mode)
     (setq buffer-read-only t
@@ -548,11 +197,6 @@ records exactly what create sent (not always NeedsSizing)."
     (setq buffer-read-only t org-tickets--sync-in-progress t)
     (org-tickets--sync-cleanup)
     (should buffer-read-only)))
-
-(ert-deftest org-tickets-test--interactive-commands-have-public-names ()
-  (dolist (cmd '(org-tickets-create-story org-tickets-add-block-link
-                                       org-tickets-set-fix-version org-tickets-update-story-sizing))
-    (should (commandp cmd))))
 
 (ert-deftest org-tickets-test--create-ticket-payload ()
   "Creating a ticket record POSTs every field it carries."
@@ -608,4 +252,6 @@ sentinel is only meaningful inside the dynamic bindings at the two
 request encode sites."
   (should (eq (default-value 'json-null) nil)))
 
-(provide (quote org-tickets-test-sync))
+(provide 'org-tickets-test-sync)
+
+;;; org-tickets-test-sync.el ends here

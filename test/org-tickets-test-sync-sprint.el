@@ -8,32 +8,6 @@
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-;;;; Tests for Sprint Sync
-
-(ert-deftest org-tickets-test--sync-sprint-to-jira ()
-  "Test syncing Sprint property to Jira."
-  (let ((org-tickets-project-key "TEST")
-        (org-tickets-project-id "12345"))
-    (with-temp-buffer
-      (insert "* Test\n")
-      (org-mode)
-      (goto-char (point-min))
-      (re-search-forward "\\*" nil t)
-      (org-entry-put (point) "JIRA_KEY" "TEST-123")
-      (org-entry-put (point) "JIRA_TYPE" "Task")
-      (org-entry-put (point) "SPRINT" "Sprint 1")
-      (let ((ticket (org-tickets--parse-ticket-at-point)))
-        (should (string= (org-tickets--ticket-sprint ticket) "Sprint 1"))))))
-
-(ert-deftest org-tickets-test--import-pulls-sprint-from-jira ()
-  "Test that import pulls sprint from Jira when org is missing sprint."
-  ;; Verify that org-tickets--parse-jira-issue extracts sprint field
-  (let* ((jira-response
-          (org-tickets-test--json "{\"id\": \"12345\", \"key\": \"PROJ-100\", \"fields\": {\"summary\": \"Test ticket\", \
-    \"issuetype\": {\"name\": \"Story\"}, \"customfield_10020\": [{\"name\": \"Sprint 42\"}]}}"))
-         (ticket (org-tickets--parse-jira-issue jira-response)))
-    (should (string= (org-tickets--ticket-sprint ticket) "Sprint 42"))))
-
 ;;;; Tests for Sprint API Format
 
 (defmacro org-tickets-test--capturing-requests (requests &rest body)
@@ -119,7 +93,15 @@ issue creates answer with key PROJ-9 and sprint names resolve to 3453."
       (should (equal (org-tickets--with-sprint-field fields "No Such Sprint")
                      fields)))))
 
-;;;; Tests for resolve-sprint-value
+;;;; Tests for sprint resolution
+
+(ert-deftest org-tickets-test--resolve-sprint-id-looks-up-by-name ()
+  "The sprint cache maps names to IDs; unknown names resolve to nil."
+  (let ((org-tickets--sprint-cache '(("Test Sprint" . "3453")
+                                     ("Next Sprint" . "3454"))))
+    (should (equal (org-tickets--resolve-sprint-id "Test Sprint") "3453"))
+    (should (equal (org-tickets--resolve-sprint-id "Next Sprint") "3454"))
+    (should-not (org-tickets--resolve-sprint-id "Nonexistent Sprint"))))
 
 (ert-deftest org-tickets-test--resolve-sprint-value-from-name ()
   "Test that resolve-sprint-value resolves a name to numeric ID."
@@ -141,9 +123,8 @@ issue creates answer with key PROJ-9 and sprint names resolve to 3453."
                                (lambda (_name) nil)))
     (should (null (org-tickets--resolve-sprint-value "Nonexistent Sprint")))))
 
-(ert-deftest org-tickets-test--extract-sprint-honors-custom-field ()
-  "`org-tickets--issue-sprint' reads the configured
-`org-tickets-sprint-field', not a hardcoded customfield_10020."
+(ert-deftest org-tickets-test--issue-sprint-reads-configured-field ()
+  "The sprint is read from `org-tickets-sprint-field', whatever its id."
   (let ((org-tickets-sprint-field "customfield_99999"))
     (let ((response (org-tickets-test--json
                      "{\"fields\": {\"customfield_99999\": [{\"name\": \"Sprint 42\", \"state\": \"active\"}]}}")))
@@ -173,13 +154,11 @@ issue creates answer with key PROJ-9 and sprint names resolve to 3453."
 
 (ert-deftest org-tickets-test--sprint-cache-is-cleared-between-syncs ()
   "Test that the sprint cache is cleared between sync sessions."
-  (let ((org-tickets--sprint-cache (org-tickets-test--json "{\"Old Sprint\": \"3453\"}")))
+  (let ((org-tickets--sprint-cache '(("Old Sprint" . "3453"))))
     (org-tickets--clear-sprint-cache)
     (should (null org-tickets--sprint-cache))))
 
-;;;; Regression tests for symbol-key JSON responses
-;; Emacs json-read-from-string with json-object-type 'alist produces symbol
-;; keys, not string keys.  These tests verify sprint functions handle both.
+;;;; Sprint listing API
 
 (ert-deftest org-tickets-test--get-sprints-with-symbol-keys ()
   "Test that fetch-board-sprints reads a parsed JSON sprint listing.

@@ -22,7 +22,7 @@
 
 ;; Tests for the async HTTP layer in org-tickets-async.el.
 ;; Covers: async-request dispatch, error handling, 429 rate limiting,
-;; batch coordination, modeline progress, and encoding.
+;; batch coordination, modeline progress, and request encoding.
 
 ;;; Code:
 
@@ -109,35 +109,8 @@ a \"JSON parse error\" string and a nil response, rather than signalling."
         (should (stringp got-err))
         (should (string-match-p "JSON parse error" got-err))))))
 
-(ert-deftest org-tickets-test--async-request-429-requeues-thunk ()
-  "Verify a 429 response sets throttled state and re-queues the thunk.
-
-`url-retrieve' calls the callback in url.el's response buffer, but
-rate-limit state must land in the buffer that made the request (the
-state buffer captured by `org-tickets--async-request'), never in the
-dead response buffer."
-  (with-temp-buffer
-    (org-tickets--rate-limit-reset)
-    (let ((state-buffer (current-buffer)))
-      ;; The fake answers in a fresh response buffer, distinct from the
-      ;; state buffer.
-      (org-tickets-test--with-url-responses
-          (list "HTTP/1.1 429 Too Many Requests\nRetry-After: 3\n\n")
-          nil
-        (org-tickets--async-request
-         "GET" "/rest/api/3/issue/PROJ-123"
-         #'ignore))
-      (with-current-buffer state-buffer
-        (let ((state (org-tickets--rate-state)))
-          ;; After 429: throttled-p should be set
-          (should (org-tickets--rate-limit-state-throttled-p state))
-          ;; The request thunk should have been re-queued
-          (should (= 1 (length (org-tickets--rate-limit-state-pending-queue state))))
-          ;; max-concurrent should be 1 during throttle
-          (should (= 1 (org-tickets--rate-limit-state-max-concurrent state))))))))
-
 (ert-deftest org-tickets-test--async-request-encoding-utf8 ()
-  "Verify JSON request body is UTF-8 encoded for non-ASCII data."
+  "The request body is unibyte UTF-8 that decodes back to the original text."
   (let ((calls nil))
     (org-tickets-test--with-url-responses :deferred calls
       (with-temp-buffer
@@ -145,16 +118,14 @@ dead response buffer."
         (org-tickets--async-request
          "POST" "/rest/api/3/issue"
          #'ignore
-         (list (cons "summary" "Café résumé — español")))))
-    (let ((captured-data (plist-get (car calls) :data)))
-      (should captured-data)
-      ;; The encoded bytes should be longer than the raw Elisp string
-      ;; because multi-byte chars get expanded to multiple UTF-8 bytes
-      (should (> (length captured-data) 10))
-      ;; The content should decode back to valid UTF-8 containing the original text
-      (let ((decoded (decode-coding-string captured-data 'utf-8)))
-        (should (string-match-p "Caf" decoded))
-        (should (string-match-p "summary" decoded))))))
+         (list (cons 'summary "Caf\u00e9 r\u00e9sum\u00e9 \u2014 espa\u00f1ol")))))
+    (let ((data (plist-get (car calls) :data)))
+      (should data)
+      (should-not (multibyte-string-p data))
+      (should (equal (cdr (assq 'summary
+                                (json-read-from-string
+                                 (decode-coding-string data 'utf-8))))
+                     "Caf\u00e9 r\u00e9sum\u00e9 \u2014 espa\u00f1ol")))))
 
 ;;;; Tests: org-tickets--async-batch
 
@@ -250,7 +221,7 @@ Uses deferred callbacks to simulate out-of-order completion."
         (should (null (org-tickets--rate-limit-state-throttled-p state)))))))
 
 (ert-deftest org-tickets-test--rate-limit-resume-doubles-max-concurrent ()
-  "Verify org-tickets--rate-limit-resume doubles max-concurrent: 1->2->4->8->nil."
+  "Each resume doubles max-concurrent: 1->2->4->8->nil, and nil stays nil."
   (org-tickets-test--with-stubs ((run-at-time #'ignore))
     (with-temp-buffer
       (org-tickets--rate-limit-reset)
@@ -271,15 +242,9 @@ Uses deferred callbacks to simulate out-of-order completion."
       ;; 8 -> nil (uncapped)
       (setf (org-tickets--rate-limit-state-max-concurrent (org-tickets--rate-state)) 8)
       (org-tickets--rate-limit-resume)
+      (should (null (org-tickets--rate-limit-state-max-concurrent (org-tickets--rate-state))))
+      (org-tickets--rate-limit-resume)
       (should (null (org-tickets--rate-limit-state-max-concurrent (org-tickets--rate-state)))))))
-
-(ert-deftest org-tickets-test--rate-limit-next-max-concurrent-progression ()
-  "Verify org-tickets--rate-limit-next-max-concurrent doubles 1->2->4->8->nil."
-  (should (= 2 (org-tickets--rate-limit-next-max-concurrent 1)))
-  (should (= 4 (org-tickets--rate-limit-next-max-concurrent 2)))
-  (should (= 8 (org-tickets--rate-limit-next-max-concurrent 4)))
-  (should (null (org-tickets--rate-limit-next-max-concurrent 8)))
-  (should (null (org-tickets--rate-limit-next-max-concurrent nil))))
 
 (ert-deftest org-tickets-test--rate-limit-drain-queue-respects-max-concurrent ()
   "Verify org-tickets--rate-limit-drain-queue fires at most max-concurrent thunks.
@@ -350,28 +315,20 @@ window/display), regardless of content, so tests must evaluate the
 entry's own `:eval' form directly to observe its rendering logic."
   (eval (cadr org-tickets--progress-mode-line-entry) t))
 
-(ert-deftest org-tickets-test--progress-init-sets-total ()
-  "Verify org-tickets--progress-init sets total and resets done to zero."
-  (org-tickets-test--with-stubs ((force-mode-line-update #'ignore))
-    (with-temp-buffer
-      (org-tickets--progress-init 42)
-      (should (= 42 org-tickets--progress-total))
-      (should (= 0 org-tickets--progress-done)))))
-
-(ert-deftest org-tickets-test--progress-init-adds-to-mode-line ()
-  "Verify org-tickets--progress-init installs the shared entry on the
-default mode line and that it renders this buffer's progress."
+(ert-deftest org-tickets-test--progress-renders-done-over-total ()
+  "The shared mode-line entry renders this buffer's done/total count."
   (org-tickets-test--with-stubs ((force-mode-line-update #'ignore))
     (with-temp-buffer
       (org-tickets--progress-init 10)
       (should (member org-tickets--progress-mode-line-entry
                       (default-value 'mode-line-misc-info)))
-      (should (equal (org-tickets-test--progress-render) " [org-tickets: 0/10]")))))
+      (should (equal (org-tickets-test--progress-render) " [org-tickets: 0/10]"))
+      (dotimes (_ 3)
+        (org-tickets--progress-increment))
+      (should (equal (org-tickets-test--progress-render) " [org-tickets: 3/10]")))))
 
 (ert-deftest org-tickets-test--progress-init-replaces-stale-entry ()
-  "Verify org-tickets--progress-init does not accumulate duplicate entries
-in the default mode-line-misc-info.  Calling it multiple times must
-keep exactly one org-tickets progress entry, not grow the list."
+  "Initializing progress repeatedly keeps one entry on the default mode line."
   (org-tickets-test--with-stubs ((force-mode-line-update #'ignore))
     (with-temp-buffer
       (org-tickets--progress-init 5)
@@ -387,19 +344,8 @@ keep exactly one org-tickets progress entry, not grow the list."
                    (seq-count (lambda (entry)
                                 (equal entry org-tickets--progress-mode-line-entry))
                               (default-value 'mode-line-misc-info))))
-        ;; Total should reflect the latest call
-        (should (= 10 org-tickets--progress-total))))))
-
-(ert-deftest org-tickets-test--progress-increment-bumps-done ()
-  "Verify org-tickets--progress-increment increases done count by one."
-  (org-tickets-test--with-stubs ((force-mode-line-update #'ignore))
-    (with-temp-buffer
-      (org-tickets--progress-init 5)
-      (should (= 0 org-tickets--progress-done))
-      (org-tickets--progress-increment)
-      (should (= 1 org-tickets--progress-done))
-      (org-tickets--progress-increment)
-      (should (= 2 org-tickets--progress-done)))))
+        (should (equal (org-tickets-test--progress-render)
+                       " [org-tickets: 0/10]"))))))
 
 (ert-deftest org-tickets-test--progress-clear-hides-without-uninstalling ()
   "Verify org-tickets--progress-clear stops this buffer's rendering but
@@ -410,9 +356,7 @@ leaves the shared entry installed on the default mode line."
       (org-tickets--progress-clear)
       (should (member org-tickets--progress-mode-line-entry
                       (default-value 'mode-line-misc-info)))
-      (should (null (org-tickets-test--progress-render)))
-      (should (= 0 org-tickets--progress-total))
-      (should (= 0 org-tickets--progress-done)))))
+      (should (null (org-tickets-test--progress-render))))))
 
 (ert-deftest org-tickets-test--progress-concurrent-buffers-do-not-clobber ()
   "Buffer B's progress-clear must not remove buffer A's indicator."
@@ -433,72 +377,7 @@ leaves the shared entry installed on the default mode line."
             (should (null (org-tickets-test--progress-render)))))
       (kill-buffer buf-a) (kill-buffer buf-b))))
 
-(ert-deftest org-tickets-test--progress-format-returns-string ()
-  "Verify org-tickets--progress-format returns a correctly formatted string."
-  (org-tickets-test--with-stubs ((force-mode-line-update #'ignore))
-    (with-temp-buffer
-      (org-tickets--progress-init 10)
-      (org-tickets--progress-increment)
-      (org-tickets--progress-increment)
-      (org-tickets--progress-increment)
-      (let ((fmt (org-tickets--progress-format)))
-        (should (stringp fmt))
-        (should (string-match-p "3" fmt))
-        (should (string-match-p "10" fmt))
-        (should (string-match-p "org-tickets" fmt))))))
-
 ;;;; Tests: Buffer-local sync-in-progress
-
-(ert-deftest org-tickets-test--sync-in-progress-is-buffer-local ()
-  "Verify org-tickets--sync-in-progress is buffer-local and independent per buffer."
-  (let (buf-a buf-b)
-    (unwind-protect
-        (progn
-          (setq buf-a (get-buffer-create " *org-tickets-test-buf-a*"))
-          (setq buf-b (get-buffer-create " *org-tickets-test-buf-b*"))
-          (with-current-buffer buf-a
-            (setq org-tickets--sync-in-progress t))
-          (with-current-buffer buf-b
-            (setq org-tickets--sync-in-progress nil))
-          (should (buffer-local-value 'org-tickets--sync-in-progress buf-a))
-          (should (null (buffer-local-value 'org-tickets--sync-in-progress buf-b))))
-      (when (buffer-live-p buf-a) (kill-buffer buf-a))
-      (when (buffer-live-p buf-b) (kill-buffer buf-b)))))
-
-;;;; Tests: Encoding
-
-(ert-deftest org-tickets-test--encoding-non-ascii-json-round-trip ()
-  "Verify JSON body round-trips non-ASCII (accented chars, emoji) through encode/decode."
-  (let* ((data (list (cons "summary" "Café résumé — español")
-                     (cons "emoji" "Hello 🌍")))
-         (json-str (json-encode data))
-         (encoded (encode-coding-string json-str 'utf-8))
-         (decoded (decode-coding-string encoded 'utf-8)))
-    ;; The JSON string should contain the original text
-    (should (string-match-p "Café" json-str))
-    (should (string-match-p "résumé" json-str))
-    (should (string-match-p "español" json-str))
-    ;; UTF-8 encoding should produce more bytes than the Elisp character count
-    (should (> (length encoded) (length json-str)))
-    ;; Round-trip through encode + decode must preserve content
-    (should (string= json-str decoded))
-    ;; The decoded string must parse back as valid JSON.
-    ;; json-read-from-string returns symbol keys by default; use assq.
-    (let* ((json-object-type 'alist)
-           (parsed (json-read-from-string decoded)))
-      (should parsed)
-      (should (string-match-p "Café" (cdr (assq 'summary parsed)))))))
-
-(ert-deftest org-tickets-test--encoding-emoji-survives-utf8 ()
-  "Verify emoji characters survive UTF-8 encode/decode round-trip."
-  (let* ((text "🎉 party 🚀 rocket 🌍 earth")
-         (json-str (json-encode (list (cons "text" text))))
-         (encoded (encode-coding-string json-str 'utf-8))
-         (decoded (decode-coding-string encoded 'utf-8)))
-    (should (string= json-str decoded))
-    (let* ((json-object-type 'alist)
-           (parsed (json-read-from-string decoded)))
-      (should parsed))))
 
 (ert-deftest org-tickets-test--async-parse-retry-after-reads-header ()
   "Verify org-tickets--async-parse-retry-after extracts Retry-After value."
@@ -508,43 +387,6 @@ leaves the shared entry installed on the default mode line."
 (ert-deftest org-tickets-test--async-parse-retry-after-defaults-to-5 ()
   "Verify org-tickets--async-parse-retry-after defaults to 5 when header is absent."
   (should (= 5 (org-tickets--async-parse-retry-after "HTTP/1.1 429 Too Many Requests\n"))))
-
-;;;; Tests: Shared HTTP response core
-
-(ert-deftest org-tickets-test--http-split-response-basic ()
-  (with-temp-buffer
-    (insert "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"a\": 1}")
-    (let ((parsed (org-tickets--http-split-response)))
-      (should (string-match-p "200 OK" (plist-get parsed :status)))
-      (should (equal (string-trim (plist-get parsed :body)) "{\"a\": 1}")))))
-
-(ert-deftest org-tickets-test--http-parse-json-body-shapes ()
-  (should (null (org-tickets--http-parse-json-body "")))
-  (should (null (org-tickets--http-parse-json-body "  \n ")))
-  (let ((parsed (org-tickets--http-parse-json-body "{\"key\": \"P-1\", \"ok\": false}")))
-    (should (equal (cdr (assq 'key parsed)) "P-1"))
-    (should (eq (cdr (assq 'ok parsed)) :json-false))))
-
-(ert-deftest org-tickets-test--api-request-kills-response-buffer-and-tolerates-percent ()
-  "The sync path must kill its response buffer and never treat the URL
-as a format string (URLs with %20 crashed `message')."
-  (let ((made-buffer nil))
-    (org-tickets-test--with-fake-config
-      (org-tickets-test--with-stubs ((url-retrieve-synchronously
-                                   (lambda (_url &rest _)
-                                     (setq made-buffer (generate-new-buffer " test-http"))
-                                     (with-current-buffer made-buffer
-                                       (insert "HTTP/1.1 200 OK\n\n{\"ok\": true}"))
-                                     made-buffer)))
-        (let ((response (org-tickets--api-request "GET" "/rest/api/3/search?jql=a%20b")))
-          (should (eq (cdr (assq 'ok response)) t))
-          (should-not (buffer-live-p made-buffer)))))))
-
-(ert-deftest org-tickets-test--api-request-nil-buffer-is-clear-error ()
-  (org-tickets-test--with-fake-config
-    (org-tickets-test--with-stubs ((url-retrieve-synchronously
-                                 (lambda (&rest _) nil)))
-      (should-error (org-tickets--api-request "GET" "/x")))))
 
 ;;;; Tests: Callbacks and rate-limit state run in the requesting buffer
 

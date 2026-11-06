@@ -122,6 +122,7 @@
                    "https://x.test/browse/P-3"))))
 
 (ert-deftest org-tickets-test--copy-link-for-every-parent-type ()
+  "copy-link from inside any parent type copies that parent's link."
   (dolist (type org-tickets-test--parent-types)
     (should (equal (org-tickets-test--copied-link
                     (org-tickets-test--ticket-text "*" type "P" "*** H\n" "K-7")
@@ -137,6 +138,7 @@
         (should-error (org-tickets-copy-link) :type 'user-error)))))
 
 (ert-deftest org-tickets-test--copy-link-keeps-point ()
+  "copy-link leaves point where the user was."
   (org-tickets-test--with-stubs ((kill-new #'ignore) (message #'ignore))
     (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "r-body"
       (let ((start (point))
@@ -186,12 +188,13 @@ HEADING is the title of the heading at point when FN ran."
   "An unkeyed ticket still owns attachments added from its description."
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
-      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-text "**" "Story" "New" "*** H\nx\n")
-          "x\n"
+      (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-text "**" "Story" "New" "*** H\nh-body\n")
+          "h-body"
         (org-tickets-attach-add "/tmp/a.png")
         (should (equal (alist-get 'attach calls) "New"))))))
 
 (ert-deftest org-tickets-test--attach-open-from-description-heading ()
+  "attach-open from a description heading acts on the owning ticket."
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
       (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "*** F-Goals"
@@ -200,6 +203,7 @@ HEADING is the title of the heading at point when FN ran."
         (should-not (org-entry-get (point) "ID"))))))
 
 (ert-deftest org-tickets-test--attach-list-from-description-heading ()
+  "attach-list from a description heading lists the owning ticket's attachments."
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
       (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "**** T-Step"
@@ -208,6 +212,7 @@ HEADING is the title of the heading at point when FN ran."
         (should (equal (alist-get 'dir calls) "T"))))))
 
 (ert-deftest org-tickets-test--attach-remove-from-description-heading ()
+  "attach-remove from a description heading removes from the owning ticket."
   (let ((calls nil))
     (org-tickets-test--with-attach-spy calls
       (org-tickets-test--with-org-buffer-at (org-tickets-test--ticket-buffer-text) "**** F-Deep"
@@ -227,6 +232,7 @@ HEADING is the title of the heading at point when FN ran."
         (should (equal (alist-get 'delete calls) '("P-2" . "9")))))))
 
 (ert-deftest org-tickets-test--attach-commands-for-every-parent-type ()
+  "The attach commands work from inside any parent type."
   (dolist (type org-tickets-test--parent-types)
     (let ((calls nil))
       (org-tickets-test--with-attach-spy calls
@@ -268,14 +274,15 @@ Return (FETCHED-KEY . NEW-BUFFER-TEXT)."
 (ert-deftest org-tickets-test--pull-from-parent-description-heading ()
   "Pulling from inside a parent's headings keeps its children."
   (dolist (type org-tickets-test--parent-types)
-    (let* ((text (concat (org-tickets-test--ticket-text "*" type "P" "*** Old\no\n" "P-1")
+    (let* ((text (concat (org-tickets-test--ticket-text "*" type "P" "*** Old\nold-body\n" "P-1")
                          (org-tickets-test--ticket-text "**" "Story" "S" "s\n" "P-2")))
-           (result (org-tickets-test--pull-at text "o\n" type "fresh")))
+           (result (org-tickets-test--pull-at text "old-body" type "fresh")))
       (should (equal (car result) "P-1"))
       (should (equal (org-tickets-test--parse-tickets (cdr result))
                      '(("Pulled" . "fresh") ("S" . "s")))))))
 
 (ert-deftest org-tickets-test--pull-from-bug-description-heading ()
+  "Pulling from inside a Bug's headings updates that Bug only."
   (let ((result (org-tickets-test--pull-at (org-tickets-test--ticket-buffer-text)
                                            "s-body" "Bug" "**** Redo")))
     (should (equal (car result) "P-3"))

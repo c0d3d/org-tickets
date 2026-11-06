@@ -2,22 +2,11 @@
 
 ;; Copyright (C) 2024
 
-;; Author: Your Name
-;; Maintainer: Your Name
-;; URL: https://github.com/yourname/org-tickets
-;; Version: 0.0.1
-;; Package-Requires: ((emacs "27.1") (org "9.0"))
-
-;; This file is not part of GNU Emacs.
-
 ;;; Commentary:
 
-;; Tests for org-tickets ADF conversion functions including:
-;; - org-tickets--build-adf-description-* functions
-;; - org-tickets--jira-description-adf-format
-;; - Round-trip tests (org→ADF→org)
-;;
-;; ADF import tests are in org-tickets-test-import.el.
+;; Tests for `org-tickets--build-adf-description' (org -> ADF) and its
+;; interplay with attachments.  Org -> ADF -> org round-trips are in
+;; org-tickets-test-roundtrip.el; ADF import in org-tickets-test-import-adf.el.
 
 ;;; Code:
 
@@ -25,53 +14,43 @@
 (require 'org)
 (require 'org-element)
 
-;; Load the main library
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-(ert-deftest org-tickets-test--ordered-list-round-trip ()
-  "Regression test: ordered list survives org→ADF→org round-trip.
-Verifies both convert-to-adf (org→ADF) and parse-adf (ADF→org)
-handle ordered lists correctly after the adf-parse-ordered-list fix."
-  (let* ((org-content "1. First item\n2. Second item\n3. Third item")
-         (adf (org-tickets--build-adf-description org-content)))
-    ;; Verify ADF was built
-    (should adf)
-    (should (equal (cdr (assoc "type" adf)) "doc"))
-    ;; Verify ADF contains an orderedList
-    (let* ((content-list (cdr (assoc "content" adf)))
-           (ordered-list (seq-find (lambda (elem)
-                                     (equal (cdr (assoc "type" elem)) "orderedList"))
-                                   content-list)))
-      (should ordered-list)
-      ;; Now parse the ADF back to org text
-      (let ((result (org-tickets--parse-adf-description adf)))
-        (should (stringp result))
-        ;; All three items should survive the round-trip
-        (should (string-match-p "1\\." result))
-        (should (string-match-p "2\\." result))
-        (should (string-match-p "3\\." result))
-        (should (string-match-p "First item" result))
-        (should (string-match-p "Second item" result))
-        (should (string-match-p "Third item" result))))))
+(ert-deftest org-tickets-test--build-adf-description-list-nodes ()
+  "Ordered and bullet lists convert to orderedList and bulletList nodes."
+  (should (equal (mapcar #'org-tickets-test--block-type
+                         (org-tickets-test--adf-blocks "1. First\n2. Second"))
+                 '("orderedList")))
+  (should (equal (mapcar #'org-tickets-test--block-type
+                         (org-tickets-test--adf-blocks "- Alpha\n- Beta"))
+                 '("bulletList"))))
 
-(ert-deftest org-tickets-test--bullet-list-round-trip ()
-  "Regression test: bullet list survives org→ADF→org round-trip."
-  (let* ((org-content "- Alpha\n- Beta\n- Gamma")
-         (adf (org-tickets--build-adf-description org-content)))
-    (should adf)
-    (let* ((content-list (cdr (assoc "content" adf)))
-           (bullet-list (seq-find (lambda (elem)
-                                    (equal (cdr (assoc "type" elem)) "bulletList"))
-                                  content-list)))
-      (should bullet-list)
-      (let ((result (org-tickets--parse-adf-description adf)))
-        (should (string-match-p "Alpha" result))
-        (should (string-match-p "Beta" result))
-        (should (string-match-p "Gamma" result))))))
+(ert-deftest org-tickets-test--build-adf-description-code-block ()
+  "A src block becomes one codeBlock whose text is the code, unescaped,
+and whose attrs carry the language Jira's schema requires."
+  (should (equal (car (cdr (assoc "content"
+                                  (org-tickets--build-adf-description
+                                   "#+begin_src js\nfunction test() {\n  return true;\n}\n#+end_src"))))
+                 '(("type" . "codeBlock")
+                   ("attrs" ("language" . "js"))
+                   ("content" (("type" . "text")
+                               ("text" . "function test() {\n  return true;\n}"))))))
+  (should (equal (cdr (assoc "attrs"
+                             (car (cdr (assoc "content"
+                                              (org-tickets--build-adf-description
+                                               "#+begin_src text\nDoing the thing\n#+end_src"))))))
+                 '(("language" . "text")))))
 
-
-;;;; Tests for ADF Conversion
+(ert-deftest org-tickets-test--build-adf-description-link-is-link-mark ()
+  "An org link becomes its description text carrying a link mark."
+  (should (equal (cdr (assoc "content"
+                             (car (cdr (assoc "content"
+                                              (org-tickets--build-adf-description
+                                               "[[https://example.com][Click here]]"))))))
+                 '((("type" . "text") ("text" . "Click here")
+                    ("marks" (("type" . "link")
+                              ("attrs" ("href" . "https://example.com")))))))))
 
 (ert-deftest org-tickets-test--adf-text-not-escaped ()
   "Test that ADF text nodes contain literal text without markdown escaping.
@@ -93,7 +72,6 @@ Characters like { } [ ] should pass through unescaped in plain text nodes."
       (should (string-match-p "{braces}" all-text))
       (should (string-match-p "\\[brackets\\]" all-text)))))
 
-
 (ert-deftest org-tickets-test--build-adf-description-simple-text ()
   "Test building ADF description with simple text."
   (let ((content "This is simple text."))
@@ -108,73 +86,6 @@ Characters like { } [ ] should pass through unescaped in plain text nodes."
           (let ((text-content (cdr (assoc "content" para))))
             (should (= (length text-content) 1))
             (should (equal (cdr (assoc "text" (car text-content))) "This is simple text."))))))))
-
-(ert-deftest org-tickets-test--build-adf-description-code-block ()
-  "Test building ADF description with code block."
-  (let ((content "#+begin_src js
-function test() {
-  return true;
-}
-#+end_src"))
-    (let ((adf (org-tickets--build-adf-description content)))
-      (should adf)
-      (should (equal (cdr (assoc "type" adf)) "doc"))
-      (let ((content-list (cdr (assoc "content" adf))))
-        (should (= (length content-list) 1))
-        (let ((code-block (car content-list)))
-          (should (equal (cdr (assoc "type" code-block)) "codeBlock"))
-          (let ((code-content (cdr (assoc "content" code-block))))
-            (should code-content)
-            (should (string-match-p "function test"
-                                    (cdr (assoc "text" (car code-content)))))))))))
-
-(ert-deftest org-tickets-test--build-adf-description-code-block-language-attribute ()
-  "Test that code blocks include language attribute in attrs.
-This is required by Jira's ADF specification - code blocks without
-language attrs will be rejected with INVALID_INPUT error."
-  (let ((content "#+begin_src text
-Doing the thing
-#+end_src"))
-    (let ((adf (org-tickets--build-adf-description content)))
-      (should adf)
-      (let ((content-list (cdr (assoc "content" adf))))
-        (let ((code-block (car content-list)))
-          ;; Must have type codeBlock
-          (should (equal (cdr (assoc "type" code-block)) "codeBlock"))
-          ;; Must have attrs with language
-          (let ((attrs (cdr (assoc "attrs" code-block))))
-            (should attrs)
-            (should (equal (cdr (assoc "language" attrs)) "text"))))))))
-
-(ert-deftest org-tickets-test--build-adf-description-table ()
-  "Test building ADF description with table."
-  (let ((content "| Header1 | Header2 |
-|----------+----------|
-| Value1   | value2   |"))
-    (let ((adf (org-tickets--build-adf-description content)))
-      (should adf)
-      (should (equal (cdr (assoc "type" adf)) "doc"))
-      (let ((content-list (cdr (assoc "content" adf))))
-        (should (= (length content-list) 1))
-        (let ((table (car content-list)))
-          (should (equal (cdr (assoc "type" table)) "table"))
-          (let ((table-rows (cdr (assoc "content" table))))
-            (should (> (length table-rows) 0))
-            ;; First row should be header
-            (let ((first-row (car table-rows)))
-              (should (equal (cdr (assoc "type" first-row)) "tableRow"))
-              (let ((cells (cdr (assoc "content" first-row))))
-                (should (= (length cells) 2))
-                ;; Check header cell content
-                (let ((first-cell (car cells)))
-                  (should (equal (cdr (assoc "type" first-cell)) "tableHeader"))
-                  (let ((cell-content (cdr (assoc "content" first-cell))))
-                    (should cell-content)
-                    (let ((para (car cell-content)))
-                      (should (equal (cdr (assoc "type" para)) "paragraph"))
-                      (let ((text-node (car (cdr (assoc "content" para)))))
-                        (should (string-match-p "Header1"
-                                                (cdr (assoc "text" text-node))))))))))))))))
 
 (ert-deftest org-tickets-test--build-adf-description-table-header-attr ()
   "Test that ADF table header cells use the tableHeader node type.
@@ -234,83 +145,6 @@ And some text after.
         ;; Fourth is table
         (should (equal (cdr (assoc "type" (nth 3 content-list))) "table"))))))
 
-(ert-deftest org-tickets-test--adf-link-renders-as-link ()
-  "Test that links in ADF render as clickable links, not literal text."
-  (let ((content "[[https://example.com][Click here]]"))
-    (let ((adf (org-tickets--build-adf-description content)))
-      (should adf)
-      (let* ((content-list (cdr (assoc "content" adf)))
-             (para (car content-list))
-             (para-content (cdr (assoc "content" para))))
-        ;; Should have an inlineCard or link, not plain text with pipe
-        (let ((node (car para-content)))
-          ;; Either inlineCard with link (validate URL format)...
-          (if (equal (cdr (assoc "type" node)) "inlineCard")
-              (let ((card-attrs (cdr (assoc "attrs" node)))
-                    (url (cdr (assoc "url" card-attrs))))
-                (should url)
-                ;; Validate URL doesn't contain pipe character (invalid URL format)
-                (should-not (string-match-p "|" url)))
-            ;; Or text node with link mark (proper Jira format)
-            (progn
-              ;; Text should be the description, not contain pipe separator
-              (should-not (string-match-p "|" (cdr (assoc "text" node))))
-              ;; Must have link mark with href
-              (let ((marks (cdr (assoc "marks" node))))
-                (should marks)
-                (let ((link-mark (car marks)))
-                  (should (equal (cdr (assoc "type" link-mark)) "link"))
-                  (let ((link-attrs (cdr (assoc "attrs" link-mark))))
-                    (should (equal (cdr (assoc "href" link-attrs)) "https://example.com"))))))))))))
-
-(ert-deftest org-tickets-test--no-double-escaping-in-description ()
-  "Test that description content is not double-escaped.
-This is a regression test - the old code was calling org-tickets--org-to-jira-markdown
-before passing to create-ticket/update-ticket, which caused escaping, and then the
-create/update functions would convert again, resulting in double-escaped characters
-like \\(, \\{, etc. in the final output."
-  ;; Code with special characters that would be escaped by org-tickets--escape-jira-markdown
-  (let ((code-content "function test() {
-  return true;
-}"))
-    (let ((adf (org-tickets--build-adf-description (concat "#+begin_src js\n" code-content "\n#+end_src"))))
-      (should adf)
-      (let ((content-list (cdr (assoc "content" adf))))
-        (should (= (length content-list) 1))
-        (let ((code-block (car content-list)))
-          (should (equal (cdr (assoc "type" code-block)) "codeBlock"))
-          (let ((code-text (cdr (assoc "text" (car (cdr (assoc "content" code-block)))))))
-            ;; Verify NO backslash escaping in the output
-            (should-not (string-match-p "\\\\(" code-text))
-            (should-not (string-match-p "\\\\)" code-text))
-            (should-not (string-match-p "\\\\{" code-text))
-            (should-not (string-match-p "\\\\}" code-text))
-            ;; Verify the original content is preserved
-            (should (string-match-p "function test()" code-text))
-            (should (string-match-p "return true" code-text))))))))
-
-(ert-deftest org-tickets-test--jira-description-adf-format ()
-  "Test that description format produces valid Atlassian Document Format.
-This is a regression test - the paragraph content must be a list (array),
-not an object. The Jira API expects:
-  {\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"...\"}]}]}
-Not:
-  {\"content\": [{\"type\": \"paragraph\", \"content\": {\"type\": \"text\", \"text\": \"...\"}}]}"
-  (let* ((description "Test description")
-         ;; Build the same structure as org-tickets--create-ticket
-         (desc-alist (list (cons "type" "doc")
-                           (cons "version" 1)
-                           (cons "content" (list (list (cons "type" "paragraph")
-                                                       (cons "content" (list (list (cons "type" "text")
-                                                                                   (cons "text" description)))))))))
-         ;; Convert to JSON to verify structure
-         (json-str (json-encode desc-alist)))
-    ;; Verify the JSON structure directly - it should have nested arrays, not objects
-    ;; The bug was: "content": {"type": "text", "text": "..."} (wrong - object)
-    ;; Should be: "content": [{"type": "text", "text": "..."}] (correct - array)
-    (should (string-match-p "\"content\":\\[{\"type\":\"paragraph\",\"content\":\\[{\"type\":\"text" json-str))
-    (should (string-match-p (regexp-quote description) json-str))))
-
 (ert-deftest org-tickets-test--build-adf-table-with-bold-cell ()
   "Test building ADF table when a cell contains bold text.
 Regression test: convert-to-adf-table-cell crashed because (car ...)
@@ -335,27 +169,6 @@ returned an alist instead of a string when processing formatted content."
                                 (and (equal (cdr (assoc "type" node)) "text")
                                      (string-match-p "Bold" (cdr (assoc "text" node)))))
                               para-content))))))))
-
-(ert-deftest org-tickets-test--table-round-trip ()
-  "Regression test: table survives org→ADF→org round-trip."
-  (let* ((org-content "| Header1 | Header2 |
-|----------+----------|
-| Value1   | Value2   |")
-         (adf (org-tickets--build-adf-description org-content)))
-    (should adf)
-    (let* ((content-list (cdr (assoc "content" adf)))
-           (table (seq-find (lambda (elem)
-                              (equal (cdr (assoc "type" elem)) "table"))
-                            content-list)))
-      (should table)
-      ;; Parse back to org text
-      (let ((result (org-tickets--parse-adf-description adf)))
-        (should (stringp result))
-        (should (string-match-p "Header1" result))
-        (should (string-match-p "Header2" result))
-        (should (string-match-p "Value1" result))
-        (should (string-match-p "Value2" result))
-        (should (string-match-p "|" result))))))
 
 (ert-deftest org-tickets-test--build-adf-bold-with-nested-code ()
   "Test that bold text containing inline code converts to ADF without crashing.
@@ -459,13 +272,6 @@ Surrounding prose stays in ordinary paragraph nodes."
       (should text-node)
       (should (string= (cdr (assoc "type" text-node)) "text"))
       (should-not (cdr (assoc "marks" text-node))))))
-
-(ert-deftest org-tickets-test--adf-build-description-nil-attachments ()
-  "Test that build-adf-description works with nil attachments (backward compat)."
-  (let* ((content "Hello world")
-         (adf (org-tickets--build-adf-description content nil)))
-    (should adf)
-    (should (string= (cdr (assoc "type" adf)) "doc"))))
 
 (ert-deftest org-tickets-test--attachment-link-round-trip ()
   "Test that attachment: links survive org -> ADF -> org round-trip.
@@ -589,17 +395,8 @@ dropped and fusing the surrounding words."
     (should (member "line two" texts))
     (should-not (member "line oneline two" texts))))
 
-(ert-deftest org-tickets-test--table-with-rule-emits-tableheader-nodes ()
-  "ADF has a tableHeader node type; a bogus header attr on tableCell is
-not part of the spec and risks INVALID_INPUT."
-  (let* ((adf (org-tickets--build-adf-description
-               "| Name | Age |\n|------+-----|\n| Ann  | 4   |"))
-         (json (json-encode adf)))
-    (should (string-match-p "tableHeader" json))
-    (should (string-match-p "tableCell" json))
-    (should-not (string-match-p "\"header\"" json))))
-
 (ert-deftest org-tickets-test--table-without-rule-has-no-header-row ()
+  "A table without a rule row emits no tableHeader nodes."
   (let* ((adf (org-tickets--build-adf-description "| a | b |\n| c | d |"))
          (json (json-encode adf)))
     (should-not (string-match-p "tableHeader" json))))
@@ -630,6 +427,7 @@ mark, so the tail can't silently escape the hyperlink."
     (should (string-match-p "\"marks\":\\[{\"type\":\"strong\"}\\]" json))))
 
 (ert-deftest org-tickets-test--hardbreak-inside-bold-survives ()
+  "A line break inside bold text stays inside the bold run."
   (let* ((adf (org-tickets--build-adf-description "*line1\nline2*"))
          (json (json-encode adf)))
     (should (string-match-p "hardBreak" json))
@@ -637,9 +435,24 @@ mark, so the tail can't silently escape the hyperlink."
     (should (string-match-p "line2" json))))
 
 (ert-deftest org-tickets-test--code-and-verbatim-convert-identically ()
+  "Org code and verbatim markup both convert to a code mark."
   (let ((code (org-tickets--build-adf-description "before ~x~ after"))
         (verb (org-tickets--build-adf-description "before =x= after")))
     (should (equal code verb))))
+
+(ert-deftest org-tickets-test--build-adf-description-resolves-attachment-link ()
+  "An attachment: link becomes a mediaInline node carrying the media UUID."
+  (let* ((attachments (org-tickets-test--json
+                       "[{\"id\": \"10234\", \"filename\": \"spec.pdf\",
+                          \"mediaApiFileId\": \"sym-uuid-1\"}]"))
+         (adf (org-tickets--build-adf-description
+               "See [[attachment:spec.pdf]]" attachments))
+         (para (car (cdr (assoc "content" adf))))
+         (media (seq-find (lambda (node)
+                            (equal (cdr (assoc "type" node)) "mediaInline"))
+                          (cdr (assoc "content" para)))))
+    (should media)
+    (should (equal (cdr (assoc "id" (cdr (assoc "attrs" media)))) "sym-uuid-1"))))
 
 (provide 'org-tickets-test-convert)
 

@@ -15,8 +15,6 @@
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-;;;; Helpers
-
 ;;;; Push: no indentation after a line break
 
 (ert-deftest org-tickets-test--continuation-reported-item ()
@@ -121,11 +119,6 @@
   "Runs of spaces inside a line are untouched."
   (should (equal (org-tickets-test--inline-summary "- a  b\n  c   d")
                  '("a  b" br "c   d"))))
-
-(ert-deftest org-tickets-test--continuation-blank-indented-line-is-empty ()
-  "A continuation that is only indentation yields no text node."
-  (should (equal (org-tickets-test--inline-summary "a\n  ~x~")
-                 '("a" br "x"))))
 
 ;;;; Round trips are fixpoints
 

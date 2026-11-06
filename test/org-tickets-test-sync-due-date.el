@@ -4,68 +4,28 @@
 (require 'org)
 (require 'org-element)
 
-;; Load the main library
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-;;;; Tests for Due Date
+(defun org-tickets-test--created-due-date (due-date)
+  "Create a story with DUE-DATE against a fake Jira; return the sent duedate."
+  (let ((requests nil))
+    (org-tickets-test--with-fake-api
+        (org-tickets-test--fake-jira-handler :post-keys '("PROJ-9") :log requests)
+      (org-tickets--create-ticket
+       (org-tickets--ticket-create :type "Story" :summary "S" :due-date due-date)))
+    (org-tickets-test--payload-field
+     (nth 2 (car (org-tickets-test--requests requests "POST" "/rest/api/3/issue")))
+     'duedate)))
 
 (ert-deftest org-tickets-test--due-date-sent-in-create ()
-  "Test that duedate is sent to Jira API in create-ticket fields."
-  (let ((fields nil)
-        (due-date "2026-06-15"))
-    (when (and due-date (not (string= due-date "")))
-      (push (cons 'duedate due-date) fields))
-    (let ((duedate-field (cdr (assoc 'duedate fields))))
-      (should (string= duedate-field "2026-06-15")))))
+  "Creating a ticket with a due date POSTs it as duedate."
+  (should (equal (org-tickets-test--created-due-date "2026-06-15") "2026-06-15")))
 
-(ert-deftest org-tickets-test--due-date-not-sent-when-nil ()
-  "Test that duedate is not sent when nil."
-  (let ((fields nil)
-        (due-date nil))
-    (when (and due-date (not (string= due-date "")))
-      (push (cons 'duedate due-date) fields))
-    (should (null (assoc 'duedate fields)))))
-
-(ert-deftest org-tickets-test--parse-jira-issue-with-due-date ()
-  "Test parsing Jira issue with duedate field."
-  (let* ((jira-response
-          (org-tickets-test--json "{\"id\": \"12345\", \"key\": \"PROJ-100\", \"fields\": {\"summary\": \"Test Feature\", \
-    \"issuetype\": {\"name\": \"Feature\"}, \"duedate\": \"2026-06-15\"}}"))
-         (ticket (org-tickets--parse-jira-issue jira-response)))
-    (should (string= (org-tickets--ticket-due-date ticket) "2026-06-15"))))
-
-(ert-deftest org-tickets-test--parse-jira-issue-without-due-date ()
-  "Test parsing Jira issue with no duedate field."
-  (let* ((jira-response
-          (org-tickets-test--json "{\"id\": \"12345\", \"key\": \"PROJ-100\", \"fields\": {\"summary\": \"Test Feature\", \
-    \"issuetype\": {\"name\": \"Feature\"}}}"))
-         (ticket (org-tickets--parse-jira-issue jira-response)))
-    (should (null (org-tickets--ticket-due-date ticket)))))
-
-(ert-deftest org-tickets-test--issue-to-org-with-due-date ()
-  "Test that issue-to-org writes DUE_DATE property."
-  (let ((ticket (org-tickets--ticket-create
-                 :key "PROJ-100"
-                 :type "Feature"
-                 :summary "Test Feature"
-                 :description "Desc"
-                 :fix-version nil
-                 :labels nil
-                 :story-points nil
-                 :blocks nil
-                 :blocked-by nil
-                 :parent nil
-                 :attachments nil
-                 :sprint nil
-                 :due-date "2026-06-15")))
-    (with-temp-buffer
-      (org-mode)
-      (org-tickets--issue-to-org ticket)
-      (goto-char (point-min))
-      (re-search-forward "^\\* Test Feature" nil t)
-      (goto-char (match-beginning 0))
-      (should (string= (org-entry-get (point) "DUE_DATE") "2026-06-15")))))
+(ert-deftest org-tickets-test--due-date-not-sent-when-absent ()
+  "Creating a ticket with no, or an empty, due date sends no duedate."
+  (should-not (org-tickets-test--created-due-date nil))
+  (should-not (org-tickets-test--created-due-date "")))
 
 (ert-deftest org-tickets-test--inherit-due-date-from-parent ()
   "Test that a Story inherits due date from its parent Feature."
@@ -133,4 +93,43 @@
     (re-search-forward "PROJ-200" nil t)
     (should (null (org-entry-get (point) "DUE_DATE")))))
 
+(ert-deftest org-tickets-test--due-date-inheritance-external-parent-without-date ()
+  "An external parent with no due date in Jira leaves the child unset."
+  (org-tickets-test--with-stubs
+      ((org-tickets--get-ticket (lambda (_key) (org-tickets-test--make-get-response))))
+    (with-temp-buffer
+      (insert "* My Story
+:PROPERTIES:
+:JIRA_TYPE: Story
+:JIRA_KEY: PROJ-200
+:PARENT: PROJ-500
+:END:
+")
+      (org-mode)
+      (org-tickets--inherit-due-date "PROJ-200" "PROJ-500")
+      (goto-char (point-min))
+      (re-search-forward "PROJ-200" nil t)
+      (should-not (org-entry-get (point) "DUE_DATE")))))
+
+(ert-deftest org-tickets-test--due-date-inherited-from-external-parent ()
+  "A parent absent from the buffer supplies its due date from Jira."
+  (org-tickets-test--with-stubs
+      ((org-tickets--get-ticket
+        (lambda (_key) (org-tickets-test--make-get-response nil "2026-11-01"))))
+    (with-temp-buffer
+      (insert "* My Story
+:PROPERTIES:
+:JIRA_TYPE: Story
+:JIRA_KEY: PROJ-200
+:PARENT: PROJ-500
+:END:
+")
+      (org-mode)
+      (org-tickets--inherit-due-date "PROJ-200" "PROJ-500")
+      (goto-char (point-min))
+      (re-search-forward "PROJ-200" nil t)
+      (should (equal (org-entry-get (point) "DUE_DATE") "2026-11-01")))))
+
 (provide 'org-tickets-test-sync-due-date)
+
+;;; org-tickets-test-sync-due-date.el ends here

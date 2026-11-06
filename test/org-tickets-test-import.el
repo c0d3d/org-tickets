@@ -2,22 +2,14 @@
 
 ;; Copyright (C) 2024
 
-;; Author: Your Name
-;; Maintainer: Your Name
-;; URL: https://github.com/yourname/org-tickets
-;; Version: 0.0.1
-;; Package-Requires: ((emacs "27.1") (org "9.0"))
-
-;; This file is not part of GNU Emacs.
-
 ;;; Commentary:
 
-;; Tests for ADF→org import functions including:
-;; - org-tickets--parse-adf-description (structured ADF importer, see
-;;   org-tickets-adf-import.el and org-tickets-test-roundtrip.el)
-;; - org-tickets--parse-jira-issue
-;; - org-tickets--update-org-heading-from-ticket
-;; - org-tickets--pull-remote-changes-for-current-ticket
+;; Tests for importing Jira issues into org:
+;; - `org-tickets--parse-jira-issue' and the issue accessors
+;; - `org-tickets--issue-to-org'
+;; - `org-tickets--update-org-heading-from-ticket'
+;; - `org-tickets--pull-remote-changes-for-current-ticket'
+;; ADF text import is in org-tickets-test-import-adf.el.
 
 ;;; Code:
 
@@ -25,31 +17,17 @@
 (require 'org)
 (require 'org-element)
 
-;; Load the main library
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 
-;;;; ensure-list Tests
+;;;; ensure-list
 
-(ert-deftest org-tickets-test--ensure-list-proper-list ()
-  "Test that ensure-list returns a proper list unchanged (same object)."
-  (let ((input (list '((type . "paragraph")) '((type . "text")))))
-    (should (eq input (org-tickets--ensure-list input)))))
-
-;;;; ADF Import Tests
-
-(ert-deftest org-tickets-test--adf-import-list-followed-by-paragraph ()
-  "Test that paragraph after list stays after list in org output."
-  (let* ((adf (org-tickets-test--json "{\"type\": \"doc\", \"content\": [{\"type\": \"bulletList\", \"content\": [{\"type\": \"listItem\", \
-    \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \
-    \"text\": \"List item\"}]}]}]}, {\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \
-    \"text\": \"Text after list\"}]}]}"))
-         (result (org-tickets--parse-adf-description adf))
-         (list-pos (string-match-p "List item" result))
-         (para-pos (string-match-p "Text after list" result)))
-    (should (string-match-p "List item" result))
-    (should (string-match-p "Text after list" result))
-    (should (< list-pos para-pos))))
+(ert-deftest org-tickets-test--ensure-list-normalizes-shapes ()
+  "Vectors become lists, lists pass through, nil stays nil, atoms are wrapped."
+  (should (equal (org-tickets--ensure-list [1 2 3]) '(1 2 3)))
+  (should (equal (org-tickets--ensure-list '((a . 1) (b . 2))) '((a . 1) (b . 2))))
+  (should (equal (org-tickets--ensure-list nil) nil))
+  (should (equal (org-tickets--ensure-list "x") '("x"))))
 
 ;;;; Pull Remote / Update Heading Tests
 
@@ -121,22 +99,18 @@
       (should (string= (org-entry-get (point) "BLOCKED-BY") "")))))
 
 (ert-deftest org-tickets-test--pull-remote-changes-no-key-error ()
-  "Test that org-tickets--pull-remote-changes-for-current-ticket errors without JIRA_KEY."
+  "Pulling a heading that has no JIRA_KEY is a user error naming JIRA_KEY."
   (with-temp-buffer
     (insert "* Heading without JIRA_KEY\n")
     (org-mode)
     (goto-char (point-min))
     (re-search-forward "\\*" nil t)
-    ;; Should signal an error when JIRA_KEY is missing
-    (condition-case err
-        (progn
-          (org-tickets--pull-remote-changes-for-current-ticket)
-          (should nil))  ; should not reach here
-      (error
-       (should (string-match-p "JIRA_KEY" (error-message-string err)))))))
+    (let ((err (should-error (org-tickets--pull-remote-changes-for-current-ticket)
+                             :type 'user-error)))
+      (should (string-match-p "JIRA_KEY" (error-message-string err))))))
 
 (ert-deftest org-tickets-test--parse-jira-issue-preserves-attachment-id ()
-  "Test that parse-jira-issue preserves the Jira attachment ID."
+  "Parsed attachments keep their Jira ID, filename, content URL and size."
   (let* ((jira-response
           (org-tickets-test--json
            "{\"id\": \"99999\", \"key\": \"PROJ-200\",
@@ -152,36 +126,12 @@
     (should (= (length attachments) 2))
     (should (string= (org-tickets--attachment-id (car attachments)) "10001"))
     (should (string= (org-tickets--attachment-filename (car attachments)) "report.pdf"))
+    (should (string= (org-tickets--attachment-content-url (car attachments))
+                     "https://example.com/att/10001"))
+    (should (= (org-tickets--attachment-size (car attachments)) 5000))
     (should (string= (org-tickets--attachment-id (cadr attachments)) "10002"))))
 
 ;;;; Media / Attachment Import Tests
-
-(ert-deftest org-tickets-test--adf-import-media-inline-as-attachment-link ()
-  "Test that mediaInline ADF nodes import as [[attachment:filename]] links."
-  (let* ((id-map (list (cons "att-uuid-123" "design.pdf")
-                       (cons "att-uuid-456" "report.xlsx")))
-         (adf (org-tickets-test--json "{\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \
-    \"text\": \"See \"}, {\"type\": \"mediaInline\", \"attrs\": {\"id\": \"att-uuid-123\", \
-    \"collection\": \"\", \"type\": \"file\"}}, {\"type\": \"text\", \"text\": \" for details\"}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf id-map)))
-      (should (string-match-p "\\[\\[attachment:design\\.pdf\\]\\]" result)))))
-
-(ert-deftest org-tickets-test--adf-import-media-single-as-attachment-link ()
-  "Test that mediaSingle ADF nodes import as [[attachment:filename]] links when ID is known."
-  (let* ((id-map (list (cons "abc123" "screenshot.png")))
-         (adf (org-tickets-test--json "{\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"mediaSingle\", \
-    \"attrs\": {\"width\": 800, \"layout\": \"align-start\"}, \"content\": [{\"type\": \"media\", \
-    \"attrs\": {\"type\": \"file\", \"id\": \"abc123\", \"collection\": \"\"}}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf id-map)))
-      (should (string-match-p "\\[\\[attachment:screenshot\\.png\\]\\]" result)))))
-
-(ert-deftest org-tickets-test--adf-import-media-single-unknown-id-fallback ()
-  "Test that mediaSingle falls back to [media: id] when attachment ID is unknown."
-  (let* ((adf (org-tickets-test--json "{\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"mediaSingle\", \
-    \"content\": [{\"type\": \"media\", \"attrs\": {\"type\": \"file\", \"id\": \"unknown-id\", \
-    \"collection\": \"\"}}]}]}")))
-    (let ((result (org-tickets--parse-adf-description adf)))
-      (should (string-match-p "\\[media: unknown-id\\]" result)))))
 
 (ert-deftest org-tickets-test--parse-jira-issue-resolves-media-inline-to-attachment ()
   "Test that parse-jira-issue resolves mediaInline in description to attachment links."
@@ -226,28 +176,6 @@ When neither numeric ID nor mediaApiFileId matches, the alt attribute
     (let* ((ticket (org-tickets--parse-jira-issue jira-response))
            (desc (org-tickets--ticket-description ticket)))
       (should (string-match-p "\\[\\[attachment:image-20260327-164023\\.png\\]\\]" desc)))))
-
-(ert-deftest org-tickets-test--adf-convert-attachment-link-with-symbol-keys ()
-  "Regression: attachment link conversion must handle symbol-keyed alists.
-The Jira API response uses json-object-type 'alist which produces symbol keys,
-but the converter was using string keys with assoc, silently failing."
-  (let ((org-tickets--adf-attachments
-         (org-tickets-test--json "[{\"id\": \"10234\", \"filename\": \"spec.pdf\", \"mediaApiFileId\": \"sym-uuid-1\"}]")))
-    (with-temp-buffer
-      (insert "See [[attachment:spec.pdf]]\n")
-      (org-mode)
-      (let* ((ast (org-element-parse-buffer))
-             (adf-content (org-tickets--convert-to-adf-content ast)))
-        ;; Should have produced a mediaInline node, not a plain text fallback
-        (let* ((para (car adf-content))
-               (content (cdr (assoc "content" para)))
-               (media-node (seq-find
-                            (lambda (node)
-                              (equal (cdr (assoc "type" node)) "mediaInline"))
-                            content)))
-          (should media-node)
-          (should (string= (cdr (assoc "id" (cdr (assoc "attrs" media-node))))
-                           "sym-uuid-1")))))))
 
 (ert-deftest org-tickets-test--update-org-heading-sets-due-date ()
   "Test that org-tickets--update-org-heading-from-ticket sets DUE_DATE property."
@@ -302,7 +230,7 @@ but the converter was using string keys with assoc, silently failing."
       (let ((val (org-entry-get (point) "DUE_DATE")))
         (should (or (null val) (string= val "")))))))
 
-;;;; Task A1: description-region correctness
+;;;; Description region on pull
 
 (ert-deftest org-tickets-test--pull-preserves-child-subtrees ()
   "Updating a parent's description must not delete its child headings."
@@ -348,19 +276,6 @@ but the converter was using string keys with assoc, silently failing."
       (should (= 1 (seq-count (lambda (l) (string= l ":PROPERTIES:"))
                               (split-string text "\n")))))))
 
-(ert-deftest org-tickets-test--pull-nil-description-keeps-structure ()
-  "Clearing the description must not fuse :END: with the next heading."
-  (with-temp-buffer
-    (org-mode)
-    (insert "* Parent\n:PROPERTIES:\n:JIRA_KEY: P-1\n:JIRA_TYPE: Feature\n:END:\n"
-            "Body.\n** Child\n:PROPERTIES:\n:JIRA_KEY: P-2\n:JIRA_TYPE: Story\n:END:\n")
-    (goto-char (point-min))
-    (org-tickets--update-org-heading-from-ticket
-     (org-tickets--ticket-create :key "P-1" :type "Feature" :summary "Parent"
-                              :description nil :labels nil))
-    (should (string-match-p "^\\*\\* Child" (buffer-string)))
-    (should (string-match-p ":END:\n" (buffer-string)))))
-
 (ert-deftest org-tickets-test--pull-escapes-headline-like-description-lines ()
   "A description line starting like an org heading must not become one."
   (with-temp-buffer
@@ -381,166 +296,112 @@ but the converter was using string keys with assoc, silently failing."
         (setq count (1+ count)))
       (should (= count 1)))))
 
-(ert-deftest org-tickets-test--pull-replaces-description-subheadings ()
-  "Pulling replaces old description headings but keeps child tickets."
+;;;; issue-to-org and parse-jira-issue
+
+(defun org-tickets-test--issue-org-text (&rest slots)
+  "Return the org text `org-tickets--issue-to-org' writes for a ticket of SLOTS."
   (with-temp-buffer
     (org-mode)
-    (insert "* F\n:PROPERTIES:\n:JIRA_KEY: P-1\n:JIRA_TYPE: Feature\n:END:\n"
-            "Old.\n*** Old heading\nOld body.\n"
-            "** Child\n:PROPERTIES:\n:JIRA_KEY: P-2\n:JIRA_TYPE: Story\n:END:\n")
-    (goto-char (point-min))
-    (org-tickets--update-org-heading-from-ticket
-     (org-tickets--ticket-create :key "P-1" :type "Feature" :summary "F"
-                              :description "*** New heading\n\nNew." :labels nil))
-    (let ((text (buffer-string)))
-      (should (string-match-p "^\\*\\*\\* New heading$" text))
-      (should-not (string-match-p "Old" text))
-      (should (string-match-p "^\\*\\* Child$" text)))))
+    (org-tickets--issue-to-org (apply #'org-tickets--ticket-create slots))
+    (buffer-string)))
 
-;;;; Task A2: new inline layer
+(ert-deftest org-tickets-test--issue-to-org-feature ()
+  "A feature imports as a level-1 heading carrying its properties."
+  (let ((text (org-tickets-test--issue-org-text
+               :key "PROJ-100" :type "Feature" :summary "Test Feature"
+               :description "Feature description" :fix-version "v1.0"
+               :labels '("label1" "label2"))))
+    (should (string-match-p "^\\* Test Feature$" text))
+    (should (string-match-p ":JIRA_KEY: +PROJ-100$" text))
+    (should (string-match-p ":JIRA_TYPE: +Feature$" text))
+    (should (string-match-p ":FIX_VERSION: +v1.0$" text))
+    (should (string-match-p ":LABELS: +label1,label2$" text))
+    (should (string-match-p "^Feature description$" text))))
 
-(ert-deftest org-tickets-test--adf-import-hardbreak-in-paragraph ()
-  "hardBreak inside a top-level paragraph becomes a newline, not nothing."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"paragraph\",\"content\":[
-                        {\"type\":\"text\",\"text\":\"line1\"},
-                        {\"type\":\"hardBreak\"},
-                        {\"type\":\"text\",\"text\":\"line2\"}]}]}"))
-                 "line1\nline2")))
+(ert-deftest org-tickets-test--issue-to-org-story ()
+  "A story imports one level below the top, with links and points as properties."
+  (let ((text (org-tickets-test--issue-org-text
+               :key "PROJ-200" :type "Story" :summary "Test Story"
+               :description "Story description" :labels '("NeedsSizing")
+               :story-points 5 :blocks '("PROJ-300") :blocked-by '("PROJ-100")
+               :parent "PROJ-100")))
+    (should (string-match-p "^\\*\\* Test Story$" text))
+    (should (string-match-p ":PARENT: +PROJ-100$" text))
+    (should (string-match-p ":STORY_POINTS: +5$" text))
+    (should (string-match-p ":BLOCKS: +PROJ-300$" text))
+    (should (string-match-p ":BLOCKED-BY: +PROJ-100$" text))))
 
-(ert-deftest org-tickets-test--adf-import-marks ()
-  "strong/em/code/underline/strike/link marks map to org markup."
-  (let ((doc "{\"type\":\"doc\",\"version\":1,\"content\":[
-               {\"type\":\"paragraph\",\"content\":[
-                 {\"type\":\"text\",\"text\":\"b\",\"marks\":[{\"type\":\"strong\"}]},
-                 {\"type\":\"text\",\"text\":\"i\",\"marks\":[{\"type\":\"em\"}]},
-                 {\"type\":\"text\",\"text\":\"c\",\"marks\":[{\"type\":\"code\"}]},
-                 {\"type\":\"text\",\"text\":\"s\",\"marks\":[{\"type\":\"strike\"}]},
-                 {\"type\":\"text\",\"text\":\"l\",\"marks\":[{\"type\":\"link\",\"attrs\":{\"href\":\"https://x.test\"}}]}]}]}"))
-    (should (equal (org-tickets--parse-adf-description (org-tickets-test--json doc))
-                   "*b*/i/~c~+s+[[https://x.test][l]]"))))
+(ert-deftest org-tickets-test--issue-to-org-keeps-description-paragraphs ()
+  "Description paragraphs, and the blank line between them, are preserved."
+  (should (string-match-p
+           "First paragraph\n\nSecond paragraph"
+           (org-tickets-test--issue-org-text
+            :key "PROJ-100" :type "Feature" :summary "Test Feature"
+            :description "First paragraph\n\nSecond paragraph"))))
 
-;;;; Task A3: block layer
+(ert-deftest org-tickets-test--issue-to-org-strips-type-prefix-from-summary ()
+  "A summary that Jira prefixed with the type name gets a clean heading."
+  (should (string-match-p
+           "^\\* Change how portalAPI access is given$"
+           (org-tickets-test--issue-org-text
+            :key "PROJ-100" :type "Improvement"
+            :summary "Improvement: Change how portalAPI access is given")))
+  (should (string-match-p
+           "^\\*\\* User wants to login$"
+           (org-tickets-test--issue-org-text
+            :key "PROJ-200" :type "Story" :summary "Story: User wants to login"))))
 
-(ert-deftest org-tickets-test--adf-import-blockquote ()
-  "Blockquotes import as org quote blocks (round-trippable)."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"blockquote\",\"content\":[
-                        {\"type\":\"paragraph\",\"content\":[
-                          {\"type\":\"text\",\"text\":\"quoted text\"}]}]}]}"))
-                 "#+BEGIN_QUOTE\nquoted text\n#+END_QUOTE")))
+(ert-deftest org-tickets-test--issue-to-org-nil-type ()
+  "A ticket without a type still imports under its summary."
+  (should (string-match-p
+           "^\\* Some summary without type prefix$"
+           (org-tickets-test--issue-org-text
+            :key "PROJ-300" :summary "Some summary without type prefix"))))
 
-(ert-deftest org-tickets-test--adf-import-rule ()
-  "Rules import as org horizontal rules."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"rule\"}]}"))
-                 "-----")))
+(ert-deftest org-tickets-test--parse-jira-issue-with-json-lists ()
+  "Fix version, labels, story points and blocking links are read from the issue."
+  (let* ((response
+          (org-tickets-test--json
+           "{\"id\": \"12345\", \"key\": \"PROJ-1\", \"fields\": {
+              \"summary\": \"Test Feature\", \"issuetype\": {\"name\": \"Feature\"},
+              \"fixVersions\": [{\"id\": \"1\", \"name\": \"Aug2025\"}],
+              \"labels\": [\"label1\", \"label2\"], \"customfield_10016\": 5,
+              \"issuelinks\": [
+                {\"type\": {\"name\": \"Blocks\", \"outward\": \"blocks\"},
+                 \"outwardIssue\": {\"key\": \"PROJ-200\"}},
+                {\"type\": {\"name\": \"Blocks\", \"inward\": \"is blocked by\"},
+                 \"inwardIssue\": {\"key\": \"PROJ-300\"}}]}}"))
+         (ticket (org-tickets--parse-jira-issue response)))
+    (should (equal (org-tickets--ticket-key ticket) "PROJ-1"))
+    (should (equal (org-tickets--ticket-fix-version ticket) "Aug2025"))
+    (should (equal (org-tickets--ticket-labels ticket) '("label1" "label2")))
+    (should (= (org-tickets--ticket-story-points ticket) 5))
+    (should (equal (org-tickets--ticket-blocks ticket) '("PROJ-200")))
+    (should (equal (org-tickets--ticket-blocked-by ticket) '("PROJ-300")))))
 
-(ert-deftest org-tickets-test--adf-import-heading-is-org-headline ()
-  "Headings import as org headlines two levels deeper (h1 is ***), and
-push back as the same heading."
-  (let ((result (org-tickets--parse-adf-description
-                 (org-tickets-test--json
-                  "{\"type\":\"doc\",\"version\":1,\"content\":[
-                     {\"type\":\"heading\",\"attrs\":{\"level\":2},
-                      \"content\":[{\"type\":\"text\",\"text\":\"Section\"}]}]}"))))
-    (should (equal result "**** Section"))))
+(ert-deftest org-tickets-test--parse-jira-issue-reads-due-date ()
+  "The issue's duedate becomes the ticket's due date; absent stays nil."
+  (let ((with (org-tickets-test--json
+               "{\"id\": \"1\", \"key\": \"PROJ-1\", \"fields\": {\"summary\": \"S\",
+                 \"issuetype\": {\"name\": \"Feature\"}, \"duedate\": \"2026-06-15\"}}"))
+        (without (org-tickets-test--json
+                  "{\"id\": \"1\", \"key\": \"PROJ-1\", \"fields\": {\"summary\": \"S\",
+                    \"issuetype\": {\"name\": \"Feature\"}}}")))
+    (should (equal (org-tickets--ticket-due-date
+                    (org-tickets--parse-jira-issue with))
+                   "2026-06-15"))
+    (should-not (org-tickets--ticket-due-date
+                 (org-tickets--parse-jira-issue without)))))
 
-(ert-deftest org-tickets-test--adf-import-code-block ()
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"codeBlock\",\"attrs\":{\"language\":\"python\"},
-                       \"content\":[{\"type\":\"text\",\"text\":\"x = 1\\ny = 2\"}]}]}"))
-                 "#+BEGIN_SRC python\nx = 1\ny = 2\n#+END_SRC")))
+(ert-deftest org-tickets-test--issue-to-org-writes-due-date ()
+  "A ticket's due date is written as the DUE_DATE property."
+  (should (string-match-p
+           ":DUE_DATE: +2026-06-15$"
+           (org-tickets-test--issue-org-text
+            :key "PROJ-100" :type "Feature" :summary "Test Feature"
+            :due-date "2026-06-15"))))
 
-(ert-deftest org-tickets-test--adf-import-table ()
-  "Tables import as org tables; a leading all-tableHeader row imports
-with an org rule row after it (so it re-exports as a header table),
-and | in content is escaped."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"table\",\"content\":[
-                        {\"type\":\"tableRow\",\"content\":[
-                          {\"type\":\"tableHeader\",\"content\":[
-                            {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"H1\"}]}]},
-                          {\"type\":\"tableHeader\",\"content\":[
-                            {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"H2\"}]}]}]},
-                        {\"type\":\"tableRow\",\"content\":[
-                          {\"type\":\"tableCell\",\"content\":[
-                            {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}]},
-                          {\"type\":\"tableCell\",\"content\":[
-                            {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"b|c\"}]}]}]}]}]}"))
-                 "| H1 | H2 |\n|---+---|\n| a | b\\vert{}c |")))
-
-(ert-deftest org-tickets-test--adf-import-doc-blank-line-separation ()
-  "Top-level blocks are separated by exactly one blank line."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"one\"}]},
-                      {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"two\"}]}]}"))
-                 "one\n\ntwo")))
-
-;;;; Task A4: list layout with string indents
-
-(ert-deftest org-tickets-test--adf-import-nested-bullet-list ()
-  "Nested bullets get their own indented lines, not jammed inline."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"bulletList\",\"content\":[
-                        {\"type\":\"listItem\",\"content\":[
-                          {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"first\"}]},
-                          {\"type\":\"bulletList\",\"content\":[
-                            {\"type\":\"listItem\",\"content\":[
-                              {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"nested\"}]}]}]}]}]}]}"))
-                 "- first\n  - nested")))
-
-(ert-deftest org-tickets-test--adf-import-nested-list-under-ordered-item ()
-  "Ordered items indent children past their marker width (\"1. \" = 3 cols)."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"orderedList\",\"content\":[
-                        {\"type\":\"listItem\",\"content\":[
-                          {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"first\"}]},
-                          {\"type\":\"bulletList\",\"content\":[
-                            {\"type\":\"listItem\",\"content\":[
-                              {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"nested\"}]}]}]}]}]}]}"))
-                 "1. first\n   - nested")))
-
-(ert-deftest org-tickets-test--adf-import-multiline-list-item ()
-  "hardBreak continuation lines inside an item align under the item text."
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"bulletList\",\"content\":[
-                        {\"type\":\"listItem\",\"content\":[
-                          {\"type\":\"paragraph\",\"content\":[
-                            {\"type\":\"text\",\"text\":\"a\"},
-                            {\"type\":\"hardBreak\"},
-                            {\"type\":\"text\",\"text\":\"b\"}]}]}]}]}"))
-                 "- a\n  b")))
-
-(ert-deftest org-tickets-test--adf-import-ordered-numbering ()
-  (should (equal (org-tickets--parse-adf-description
-                  (org-tickets-test--json
-                   "{\"type\":\"doc\",\"version\":1,\"content\":[
-                      {\"type\":\"orderedList\",\"content\":[
-                        {\"type\":\"listItem\",\"content\":[
-                          {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"one\"}]}]},
-                        {\"type\":\"listItem\",\"content\":[
-                          {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"two\"}]}]}]}]}"))
-                 "1. one\n2. two")))
-
-;;;; Task A5: parse-failure fallback
+;;;; Parse-failure fallback
 
 (ert-deftest org-tickets-test--adf-parse-failure-yields-nil-description ()
   "A description that cannot be parsed becomes nil, never a raw %S dump."
@@ -554,7 +415,7 @@ and | in content is escaped."
     (let ((ticket (org-tickets--parse-jira-issue response)))
       (should (null (org-tickets--ticket-description ticket))))))
 
-;;;; Task A6: import-side hardening
+;;;; Import hardening
 
 (ert-deftest org-tickets-test--issue-to-org-escapes-headline-lines ()
   "Imported descriptions with headline-like lines stay one heading."

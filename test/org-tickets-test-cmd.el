@@ -6,34 +6,28 @@
 (require 'org-tickets-test-fixtures)
 
 (ert-deftest org-tickets-test--copy-ticket-link-to-clipboard ()
-  "Test copying Jira ticket link to clipboard."
+  "The ticket's browse URL is put on the kill ring."
   (let ((org-tickets-base-url "https://test.atlassian.net")
         (org-tickets-project-key "TEST")
         (captured-url nil))
-    ;; Mock the selection functions and kill-new
-    (org-tickets-test--with-stubs ((x-get-selection (lambda (_) nil))
-                                (x-set-selection (lambda (_ val)
-                                                   (should (string-match-p "TEST-123" val))
-                                                   (should (string-match-p "test.atlassian.net" val))))
-                                (kill-new (lambda (val)
-                                            (setq captured-url val)
-                                            (should (string-match-p "TEST-123" val))
-                                            (should (string-match-p "test.atlassian.net" val)))))
+    (org-tickets-test--with-stubs ((kill-new (lambda (val) (setq captured-url val))))
       (org-tickets--copy-ticket-link-to-clipboard "TEST-123")
-      (should captured-url)
-      (should (string= captured-url "https://test.atlassian.net/browse/TEST-123")))))
+      (should (equal captured-url "https://test.atlassian.net/browse/TEST-123")))))
 
 (ert-deftest org-tickets-test--insert-ticket-hyperlink ()
-  "Test inserting hyperlink to another ticket."
+  "Inserting a ticket hyperlink writes an org link to its browse URL."
   (let ((org-tickets-base-url "https://test.atlassian.net"))
     (with-temp-buffer
       (insert "* Test heading\n")
       (org-mode)
-      (goto-char (point-min))
+      (goto-char (point-max))
       (org-tickets--insert-ticket-hyperlink "TEST-456")
-      (should (string-match-p "\\[TEST-456\\|https://test.atlassian.net.*TEST-456\\]" (buffer-string))))))
+      (should (equal (string-trim (buffer-string))
+                     (concat "* Test heading\n"
+                             "[[https://test.atlassian.net/browse/TEST-456][TEST-456]]"))))))
 
 (ert-deftest org-tickets-test--attach-remove-deletes-remote-and-reports-truthfully ()
+  "A file held only by Jira is deleted there and the message says so."
   (with-temp-buffer
     (org-mode)
     (insert "* T\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-1\n:END:\n")
@@ -87,6 +81,7 @@ deletion happened."
       (should-error (org-tickets-copy-link)))))
 
 (ert-deftest org-tickets-test--story-template-does-not-overwrite-parent-fix-version ()
+  "The story template leaves the parent's FIX_VERSION alone."
   (with-temp-buffer
     (org-mode)
     (insert "* Feature\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
@@ -134,16 +129,19 @@ buffer's \"New\" heading properties via `org-entry-get' on the new heading."
     (should-not (org-entry-get (point) "LABELS"))))
 
 (ert-deftest org-tickets-test--feature-template-at-existing-heading ()
+  "The feature template fills in the heading at point."
   (org-tickets-test--props-at-new-heading
    (lambda () (org-tickets-insert-feature-template "New" "" ""))
    "New Feature"))
 
 (ert-deftest org-tickets-test--improvement-template-at-existing-heading ()
+  "The improvement template fills in the heading at point."
   (org-tickets-test--props-at-new-heading
    (lambda () (org-tickets-insert-improvement-template "New" "" ""))
    "Improvement"))
 
 (ert-deftest org-tickets-test--story-template-at-existing-heading ()
+  "The story template fills in the heading at point."
   (with-temp-buffer
     (org-mode)
     (insert "* Other\n")
@@ -160,9 +158,9 @@ buffer's \"New\" heading properties via `org-entry-get' on the new heading."
     (should-not (org-entry-get (point) "PARENT"))))
 
 (ert-deftest org-tickets-test--story-template-prompts-fix-version ()
+  "The story template command prompts for a Fix Version."
   (should (string-match-p "Fix Version"
                           (cadr (interactive-form 'org-tickets-insert-story-template)))))
-
 
 ;;;; Point preservation
 
@@ -192,24 +190,28 @@ Network functions are stubbed.  Fail when BODY moves point."
        (should (= (marker-position before) (point))))))
 
 (ert-deftest org-tickets-test--block-link-keeps-point ()
+  "Adding a block link leaves point where the user was."
   (org-tickets-test--keeps-point
     (org-tickets-add-block-link "PROJ-1" "PROJ-2")
     (should (equal "PROJ-2" (org-entry-get (org-tickets--find-ticket-by-key "PROJ-1")
                                            "BLOCKS")))))
 
 (ert-deftest org-tickets-test--set-fix-version-keeps-point ()
+  "Setting the Fix Version leaves point where the user was."
   (org-tickets-test--keeps-point
     (org-tickets-set-fix-version "PROJ-1" "Aug2026")
     (should (equal "Aug2026" (org-entry-get (org-tickets--find-ticket-by-key "PROJ-1")
                                             "FIX_VERSION")))))
 
 (ert-deftest org-tickets-test--update-story-sizing-keeps-point ()
+  "Updating story sizing leaves point where the user was."
   (org-tickets-test--keeps-point
     (org-tickets-update-story-sizing "PROJ-1" 3)
     (should (equal "3" (org-entry-get (org-tickets--find-ticket-by-key "PROJ-1")
                                       "STORY_POINTS")))))
 
 (ert-deftest org-tickets-test--with-ticket-at-key-narrowed ()
+  "Lookup by key honors the narrowing and restores point and restriction."
   (with-temp-buffer
     (org-mode)
     (insert org-tickets-test--two-tickets)
@@ -226,6 +228,7 @@ Network functions are stubbed.  Fail when BODY moves point."
       (should (= end (point-max))))))
 
 (ert-deftest org-tickets-test--load-issue-types-keeps-point-and-skips-src ()
+  "Loading issue types leaves point alone and ignores src blocks."
   (let ((org-tickets--issue-type-ids nil))
     (with-temp-buffer
       (org-mode)
@@ -244,6 +247,7 @@ Network functions are stubbed.  Fail when BODY moves point."
         (should (= pt (point)))))))
 
 (ert-deftest org-tickets-test--refresh-issue-types-requires-org-buffer ()
+  "Refreshing issue types outside an org buffer is an error."
   (with-temp-buffer
     (fundamental-mode)
     (org-tickets-test--with-stubs
@@ -276,11 +280,26 @@ No Jira attachments exist and the attachment directory is absent."
                               (error-message-string err))))))
 
 (ert-deftest org-tickets-test--attach-remove-file-not-found ()
-  "Removal errors clearly when the named file exists nowhere."
-  (org-tickets-test--with-remove-attachment-stubs
-    (let ((err (should-error (org-tickets-attach-remove "nonexistent.pdf"))))
-      (should (string-match-p "nonexistent.pdf not found"
-                              (error-message-string err))))))
+  "Removal errors clearly when the attachment directory exists but the
+named file is in neither it nor Jira."
+  (let ((dir (make-temp-file "org-tickets-attach" t)))
+    (unwind-protect
+        (org-tickets-test--with-remove-attachment-stubs
+          (org-tickets-test--with-stubs ((org-tickets--get-ticket-attach-dir
+                                          (lambda (_create) dir)))
+            (let ((err (should-error (org-tickets-attach-remove "nonexistent.pdf"))))
+              (should (string-match-p "nonexistent.pdf not found"
+                                      (error-message-string err))))))
+      (delete-directory dir t))))
+
+(ert-deftest org-tickets-test--attach-remove-no-jira-key ()
+  "Removing an attachment from a heading without a JIRA_KEY is an error."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Test\n:PROPERTIES:\n:JIRA_TYPE: New Feature\n:END:\n")
+    (goto-char (point-min))
+    (let ((err (should-error (org-tickets-attach-remove "test.pdf"))))
+      (should (string-match-p "JIRA_KEY" (error-message-string err))))))
 
 (provide 'org-tickets-test-cmd)
 ;;; org-tickets-test-cmd.el ends here

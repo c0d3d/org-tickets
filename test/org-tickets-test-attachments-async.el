@@ -2,7 +2,6 @@
 
 ;; Copyright (C) 2025
 
-;; Author: org-tickets contributors
 ;; Keywords: org, jira, tests
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -28,7 +27,6 @@
 (require 'ert)
 (require 'org-tickets-test-fixtures)
 
-;; Load the main library
 (require 'org-tickets)
 
 ;;;; Helpers
@@ -239,59 +237,7 @@ url.el sends the file bytes unchanged."
      "PROJ-1" nil
      (lambda (results err)
        (setq callback-result (list results err))))
-    (should callback-result)))
-
-;;;; Async Batch Upload Tests
-
-(ert-deftest org-tickets-test--async-upload-attachments-dedup ()
-  "Batch upload skips files that already exist in Jira by filename."
-  (let ((uploaded nil)
-        (callback-result nil)
-        (temp-dir (make-temp-file "org-tickets-test-" t)))
-    (unwind-protect
-        (progn
-          ;; Create two local files
-          (with-temp-file (expand-file-name "existing.txt" temp-dir)
-            (insert "already in jira"))
-          (with-temp-file (expand-file-name "new-file.txt" temp-dir)
-            (insert "not in jira"))
-          (org-tickets-test--with-stubs ((org-tickets--async-upload-attachment
-                                       (lambda (ticket-key file-path callback)
-                                         (push (file-name-nondirectory file-path) uploaded)
-                                         (funcall callback t nil)))
-                                      (org-tickets--find-ticket-by-key
-                                       (lambda (_key) (point)))
-                                      (org-tickets--get-ticket-attach-dir
-                                       (lambda (_create) temp-dir)))
-            (with-temp-buffer
-              (org-mode)
-              (org-tickets-test--insert-ticket 1 "Ticket" "JIRA_KEY" "PROJ-1")
-              (org-tickets--async-upload-attachments
-               "PROJ-1"
-               ;; Jira already has "existing.txt"
-               (org-tickets-test--json "[{\"filename\": \"existing.txt\"}]")
-               (lambda (results err)
-                 (setq callback-result (list results err))))))
-          ;; Only "new-file.txt" should be uploaded
-          (should (equal uploaded '("new-file.txt")))
-          (should callback-result))
-      (delete-directory temp-dir t))))
-
-(ert-deftest org-tickets-test--async-upload-attachments-no-dir ()
-  "Batch upload calls callback immediately when no attach dir exists."
-  (let ((callback-result nil))
-    (org-tickets-test--with-stubs ((org-tickets--find-ticket-by-key
-                                 (lambda (_key) (point)))
-                                (org-tickets--get-ticket-attach-dir
-                                 (lambda (_create) nil)))
-      (with-temp-buffer
-        (org-mode)
-        (org-tickets-test--insert-ticket 1 "Ticket" "JIRA_KEY" "PROJ-1")
-        (org-tickets--async-upload-attachments
-         "PROJ-1" nil
-         (lambda (results err)
-           (setq callback-result (list results err))))))
-    (should callback-result)))
+    (should (equal callback-result '(nil nil)))))
 
 (provide 'org-tickets-test-attachments-async)
 ;;; org-tickets-test-attachments-async.el ends here

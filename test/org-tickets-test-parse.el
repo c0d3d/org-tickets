@@ -11,6 +11,7 @@
 ;;;; Description extraction tests
 
 (ert-deftest org-tickets-test--description-simple ()
+  "A plain description is the text under the heading."
   (let ((content "* Heading
 Some description text."))
     (with-temp-buffer
@@ -166,33 +167,6 @@ Description after properties drawer."))
       (goto-char (match-beginning 0))
       (let ((parent-key (org-tickets--find-parent-ticket-key)))
         (should (null parent-key))))))
-
-(ert-deftest org-tickets-test--empty-parent-property-handling ()
-  "Test that empty PARENT property in org is treated as nil."
-  (let ((content "* Parent Feature
-:PROPERTIES:
-:JIRA_TYPE: New Feature
-:JIRA_KEY: PROJ-123
-:END:
-** Child Story
-:PROPERTIES:
-:JIRA_TYPE: Story
-:PARENT:
-:JIRA_KEY: PROJ-456
-:END:
-"))
-    (with-temp-buffer
-      (insert content)
-      (org-mode)
-      (goto-char (point-min))
-      (re-search-forward "^\\*\\* Child Story" nil t)
-      (goto-char (match-beginning 0))
-      ;; Get the PARENT property - it should be an empty string
-      (let ((parent-prop (org-entry-get (point) "PARENT")))
-        ;; Simulate what the code does: check if it's an empty string
-        (should (string= parent-prop ""))
-        ;; Now test our check logic
-        (should (null (and parent-prop (> (length parent-prop) 0))))))))
 
 (ert-deftest org-tickets-test--parse-ticket-with-empty-parent ()
   "Test parsing a ticket with empty PARENT property returns nil for parent."
@@ -406,41 +380,19 @@ Improvement description.
 ;;;; Tests for Validation
 
 (ert-deftest org-tickets-test--validate-fix-version ()
-  "Test validating Fix Version format."
-  (should (org-tickets--validate-fix-version "Aug2026"))
-  (should (org-tickets--validate-fix-version "Feb2025"))
-  (should (org-tickets--validate-fix-version "May2027"))
-  (should (org-tickets--validate-fix-version "Nov2024"))
-  (should (null (org-tickets--validate-fix-version "Jan2026")))  ;; Invalid month
-  (should (null (org-tickets--validate-fix-version "Aug202")))   ;; Invalid year
-  (should (null (org-tickets--validate-fix-version "2026Aug"))) ;; Wrong order
-  (should (null (org-tickets--validate-fix-version "")))         ;; Empty
-  (should (null (org-tickets--validate-fix-version nil))))      ;; Nil
-
-(ert-deftest org-tickets-test--issue-link-json-format ()
-  "Test that issue link format produces valid Jira API payload.
-This is a regression test - the payload must have type, inwardIssue, and outwardIssue
-at the top level (not nested under 'body'), and the outward field should not have
-a double 's' suffix."
-  (let* ((from-key "PROJ-12640")
-         (to-key "PROJ-12637")
-         (link-type "Blocks")
-         ;; Build the same structure as org-tickets--create-link
-         (link-payload (list (cons 'type (list (cons "name" link-type)))
-                             (cons "inwardIssue" (list (cons "key" from-key)))
-                             (cons "outwardIssue" (list (cons "key" to-key)))))
-         (json-str (json-encode link-payload)))
-    ;; Verify the JSON structure - should have type, inwardIssue, outwardIssue at top level
-    (should (string-match-p "\"type\":" json-str))
-    (should (string-match-p "\"inwardIssue\":" json-str))
-    (should (string-match-p "\"outwardIssue\":" json-str))
-    ;; Should NOT have 'body' wrapper (was a bug)
-    (should-not (string-match-p "\"body\":" json-str))
-    ;; Should NOT have 'blockss' typo (was a bug - extra 's')
-    (should-not (string-match-p "blockss" json-str))
-    ;; Should have correct key values
-    (should (string-match-p (regexp-quote from-key) json-str))
-    (should (string-match-p (regexp-quote to-key) json-str))))
+  "Fix Version must be a configured month followed by a four-digit year."
+  (let ((org-tickets-fix-version-months '("Feb" "May" "Aug" "Nov")))
+    (should (org-tickets--validate-fix-version "Aug2026"))
+    (should (org-tickets--validate-fix-version "Feb2025"))
+    (should (org-tickets--validate-fix-version "May2027"))
+    (should (org-tickets--validate-fix-version "Nov2024"))
+    (should (null (org-tickets--validate-fix-version "Jan2026")))  ;; Invalid month
+    (should (null (org-tickets--validate-fix-version "Aug202")))   ;; Invalid year
+    (should (null (org-tickets--validate-fix-version "2026Aug"))) ;; Wrong order
+    (should (null (org-tickets--validate-fix-version "")))         ;; Empty
+    (should (null (org-tickets--validate-fix-version nil)))      ;; Nil
+    (should-not (org-tickets--validate-fix-version "Aug2026-draft"))
+    (should-not (org-tickets--validate-fix-version "xxAug2026"))))
 
 ;;;; Tests for Sprint parsing from Jira
 
@@ -451,6 +403,17 @@ a double 's' suffix."
     \"customfield_10020\": [{\"name\": \"Sprint 1\", \"state\": \"active\"}]}}"))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     (should (string= (org-tickets--ticket-sprint ticket) "Sprint 1"))))
+
+(ert-deftest org-tickets-test--parse-ticket-sprint-property ()
+  "A ticket's SPRINT property is parsed into its sprint slot."
+  (with-temp-buffer
+    (insert "* Test\n:PROPERTIES:\n:JIRA_KEY: TEST-123\n:JIRA_TYPE: Task\n"
+            ":SPRINT: Sprint 1\n:END:\n")
+    (org-mode)
+    (goto-char (point-min))
+    (should (equal (org-tickets--ticket-sprint
+                    (org-tickets--parse-ticket-at-point))
+                   "Sprint 1"))))
 
 (ert-deftest org-tickets-test--parse-sprint-no-sprint ()
   "Test parsing Jira response with no Sprint field."
@@ -534,14 +497,8 @@ Description.
         (should ticket)
         (should (null (org-tickets--ticket-due-date ticket)))))))
 
-(ert-deftest org-tickets-test--field-id-defcustoms-exist ()
-  "The Jira custom-field IDs are configurable, not hardcoded."
-  (should (equal org-tickets-story-points-field "customfield_10016"))
-  (should (equal org-tickets-sprint-field "customfield_10020"))
-  (should (get 'org-tickets-story-points-field 'custom-type))
-  (should (get 'org-tickets-sprint-field 'custom-type)))
-
 (ert-deftest org-tickets-test--parse-captures-heading-markers ()
+  "Parsing records a marker that leads back to the ticket's heading."
   (with-temp-buffer
     (org-mode)
     (insert "* T\n:PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n")
@@ -617,8 +574,6 @@ Description.
   (dolist (key '("2AB-1" "ab-1" "PROJ-" "PROJ-1x" "-1" nil))
     (should-not (org-tickets--valid-ticket-key-p key))))
 
-(provide (quote org-tickets-test-parse))
-
 ;;;; Whitespace-only properties
 
 (ert-deftest org-tickets-test--whitespace-only-properties-are-empty ()
@@ -659,3 +614,22 @@ A whitespace-only LABELS or STORY_POINTS still means \"clear\"."
     (let ((tk (org-tickets--parse-ticket-at-point)))
       (should-not (org-tickets--ticket-labels tk))
       (should (org-tickets--ticket-clear-labels tk)))))
+
+(ert-deftest org-tickets-test--invalid-parent-key-rejected ()
+  "Test that an invalid PARENT value is ignored during parsing."
+  (with-temp-buffer
+    (insert "* My Story
+:PROPERTIES:
+:JIRA_TYPE: Story
+:JIRA_KEY: PROJ-200
+:PARENT: not-a-key
+:END:
+")
+    (org-mode)
+    (let* ((doc (org-tickets--parse-document))
+           (story (car (org-tickets--doc-children doc))))
+      (should-not (org-tickets--ticket-parent story)))))
+
+(provide 'org-tickets-test-parse)
+
+;;; org-tickets-test-parse.el ends here
