@@ -77,8 +77,9 @@ machine yourcompany.atlassian.net login your@email.com password YOUR_API_TOKEN
 
 Generate an API token from your Atlassian account settings.
 
-Credentials are looked up once per host and cached for the Emacs session;
-changing `org-tickets-base-url` to another host uses that host's entry.
+Credentials are re-read from auth-source at the start of each command, so a
+changed token takes effect on the next sync, import or refresh; changing
+`org-tickets-base-url` to another host uses that host's entry.
 
 ## Usage
 

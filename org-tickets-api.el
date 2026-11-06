@@ -70,30 +70,44 @@ The sprint is read from the field named by `org-tickets-sprint-field'."
 
 (defun org-tickets--auth-source-credentials (host)
   "Return (USER . TOKEN) for HOST from auth-source.
-Signals an error when auth-source has no entry for HOST."
+Signals an error when auth-source has no entry for HOST, or the entry
+has no login."
   (let ((auth (car (auth-source-search :host host :user nil :require '(:secret)))))
     (unless auth
       (error "No authinfo entry found for host: %s" host))
+    (unless (plist-get auth :user)
+      (error "Jira API user is not set; add a login to the authinfo entry for %s"
+             host))
     (let ((secret (plist-get auth :secret)))
       (cons (plist-get auth :user)
             (if (functionp secret) (funcall secret) secret)))))
 
+(defun org-tickets--config-host ()
+  "Return the host name of `org-tickets-base-url'."
+  (url-host (url-generic-parse-url (org-tickets--base-url))))
+
 (defun org-tickets--credentials ()
   "Return (USER . TOKEN) for the host of `org-tickets-base-url'.
-Each host's credentials are read from auth-source once and kept in
-`org-tickets--credentials-cache'."
-  (let ((host (url-host (url-generic-parse-url (org-tickets--base-url)))))
+Credentials are read from auth-source on first use and kept per host in
+`org-tickets--credentials-cache' until `org-tickets--resolve-config'
+drops them."
+  (let ((host (org-tickets--config-host)))
     (or (cdr (assoc host org-tickets--credentials-cache))
         (let ((credentials (org-tickets--auth-source-credentials host)))
           (push (cons host credentials) org-tickets--credentials-cache)
           credentials))))
 
 (defun org-tickets--resolve-config ()
-  "Check that the configuration is set and load the host's credentials.
-Signals a `user-error' naming the first unset configuration variable."
+  "Check that the configuration is set and re-read the host's credentials.
+Run at the start of each command, so a token changed in authinfo takes
+effect on the next command.  Signals a `user-error' naming the first
+unset configuration variable."
   (org-tickets--base-url)
   (org-tickets--project-key)
   (org-tickets--project-id)
+  (setq org-tickets--credentials-cache
+        (assoc-delete-all (org-tickets--config-host)
+                          org-tickets--credentials-cache))
   (org-tickets--credentials))
 
 (defun org-tickets--async-build-headers ()

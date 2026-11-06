@@ -87,6 +87,41 @@ complete."
                     :type 'user-error))
     (should-not requests)))
 
+(ert-deftest org-tickets-test--credentials-reread-per-command ()
+  "A token rotated in auth-source is used from the next command on.
+Within one command, repeated requests look credentials up once."
+  (let ((org-tickets-base-url "https://a.example")
+        (requests nil)
+        (token "old")
+        (lookups 0))
+    (org-tickets-test--with-captured-requests requests
+      (org-tickets-test--with-stubs
+          ((auth-source-search (lambda (&rest _)
+                                 (setq lookups (1+ lookups))
+                                 (list (list :user "u" :secret token)))))
+        (org-tickets--resolve-config)
+        (org-tickets--async-request "GET" "/1" #'ignore)
+        (org-tickets--async-request "GET" "/2" #'ignore)
+        (should (= lookups 1))
+        (setq token "new")
+        (org-tickets--resolve-config)
+        (org-tickets--async-request "GET" "/3" #'ignore)))
+    (should (equal (cdr (assoc "Authorization" (cdar requests)))
+                   (org-tickets-test--basic-auth "u" "new")))))
+
+(ert-deftest org-tickets-test--authinfo-entry-without-login-is-rejected ()
+  "An authinfo entry with no login signals an error and sends nothing."
+  (let ((org-tickets-base-url "https://a.example")
+        (requests nil))
+    (org-tickets-test--with-captured-requests requests
+      (org-tickets-test--with-stubs
+          ((auth-source-search (lambda (&rest _) (list (list :secret "t")))))
+        (should (string-match-p
+                 "API user is not set.*authinfo"
+                 (error-message-string
+                  (should-error (org-tickets--async-request "GET" "/x" #'ignore)))))))
+    (should-not requests)))
+
 ;;;; Issue types
 
 (ert-deftest org-tickets-test--save-issue-types-preserves-kill-ring ()
