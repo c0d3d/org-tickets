@@ -40,42 +40,34 @@
 
 (ert-deftest org-tickets-test--attachment-filename ()
   "Test extracting filename from attachment metadata."
-  (let ((attachment (list (cons "id" "12345")
-                          (cons "filename" "test.pdf")
-                          (cons "mimeType" "application/pdf")
-                          (cons "content" "https://example.com/test.pdf")
-                          (cons "size" 1024))))
+  (let ((attachment (org-tickets-test--json "{\"id\": \"12345\", \"filename\": \"test.pdf\", \"mimeType\": \"application/pdf\", \
+    \"content\": \"https://example.com/test.pdf\", \"size\": 1024}")))
     (should (string= (org-tickets--attachment-filename attachment) "test.pdf"))))
 
 (ert-deftest org-tickets-test--attachment-filename-missing ()
   "Test extracting filename when not present in attachment metadata."
-  (let ((attachment (list (cons "id" "12345")
-                          (cons "mimeType" "application/pdf"))))
+  (let ((attachment (org-tickets-test--json "{\"id\": \"12345\", \"mimeType\": \"application/pdf\"}")))
     (should (null (org-tickets--attachment-filename attachment)))))
 
 (ert-deftest org-tickets-test--attachment-id ()
   "Test extracting ID from attachment metadata."
-  (let ((attachment (list (cons "id" "12345")
-                          (cons "filename" "test.pdf"))))
+  (let ((attachment (org-tickets-test--json "{\"id\": \"12345\", \"filename\": \"test.pdf\"}")))
     (should (string= (org-tickets--attachment-id attachment) "12345"))))
 
 (ert-deftest org-tickets-test--attachment-id-missing ()
   "Test extracting ID when not present in attachment metadata."
-  (let ((attachment (list (cons "filename" "test.pdf"))))
+  (let ((attachment (org-tickets-test--json "{\"filename\": \"test.pdf\"}")))
     (should (null (org-tickets--attachment-id attachment)))))
 
 (ert-deftest org-tickets-test--attachment-content-url ()
   "Test extracting content URL from attachment metadata."
-  (let ((attachment (list (cons "id" "12345")
-                          (cons "filename" "test.pdf")
-                          (cons "content" "https://example.com/rest/api/3/attachment/12345"))))
+  (let ((attachment (org-tickets-test--json "{\"id\": \"12345\", \"filename\": \"test.pdf\", \"content\": \"https://example.com/rest/api/3/attachment/12345\"}")))
     (should (string= (org-tickets--attachment-content-url attachment)
                      "https://example.com/rest/api/3/attachment/12345"))))
 
 (ert-deftest org-tickets-test--attachment-content-url-missing ()
   "Test extracting content URL when not present in attachment metadata."
-  (let ((attachment (list (cons "id" "12345")
-                          (cons "filename" "test.pdf"))))
+  (let ((attachment (org-tickets-test--json "{\"id\": \"12345\", \"filename\": \"test.pdf\"}")))
     (should (null (org-tickets--attachment-content-url attachment)))))
 
 (ert-deftest org-tickets-test--parse-ticket-attachments-field ()
@@ -137,10 +129,7 @@ Story description.
 
 (ert-deftest org-tickets-test--ticket-struct-attachments-with-data ()
   "Test that ticket struct can hold attachment data."
-  (let ((attachment-data (list (list (cons "id" "12345")
-                                     (cons "filename" "test.pdf"))
-                               (list (cons "id" "12346")
-                                     (cons "filename" "test2.pdf")))))
+  (let ((attachment-data (org-tickets-test--json "[{\"id\": \"12345\", \"filename\": \"test.pdf\"}, {\"id\": \"12346\", \"filename\": \"test2.pdf\"}]")))
     (let ((ticket (org-tickets--ticket-create
                    :key "PROJ-123"
                    :type "Story"
@@ -212,10 +201,8 @@ Story description.
 
 (ert-deftest org-tickets-test--find-attachment-id-by-filename ()
   "Test finding attachment ID by filename from Jira attachments list."
-  (let* ((jira-attachments (list
-                            (list (cons "id" "10001") (cons "filename" "document.pdf"))
-                            (list (cons "id" "10002") (cons "filename" "image.png"))
-                            (list (cons "id" "10003") (cons "filename" "data.csv"))))
+  (let* ((jira-attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"document.pdf\"}, {\"id\": \"10002\", \"filename\": \"image.png\"}, \
+    {\"id\": \"10003\", \"filename\": \"data.csv\"}]"))
          (id-pdf (catch 'find-id
                    (dolist (att jira-attachments)
                      (when (string= (org-tickets--attachment-filename att) "document.pdf")
@@ -239,9 +226,7 @@ Story description.
 
 (ert-deftest org-tickets-test--attach-remove-finds-id-before-deleting ()
   "Test that org-tickets-attach-remove looks up attachment ID from Jira."
-  (let* ((jira-attachments (list
-                            (list (cons "id" "10001") (cons "filename" "test.pdf"))
-                            (list (cons "id" "10002") (cons "filename" "other.pdf"))))
+  (let* ((jira-attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"test.pdf\"}, {\"id\": \"10002\", \"filename\": \"other.pdf\"}]"))
          (attachment-id
           (catch 'find-id
             (dolist (att jira-attachments)
@@ -254,9 +239,7 @@ Story description.
 (ert-deftest org-tickets-test--attach-remove-handles-missing-jira-attachment ()
   "Test handling of file that exists locally but not in Jira."
   (let* ((local-files '("local-only.pdf" "both.pdf"))
-         (jira-attachments (list
-                            (list (cons "id" "10001") (cons "filename" "both.pdf"))
-                            (list (cons "id" "10002") (cons "filename" "jira-only.pdf"))))
+         (jira-attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"both.pdf\"}, {\"id\": \"10002\", \"filename\": \"jira-only.pdf\"}]"))
          (filename-to-remove "local-only.pdf")
          (attachment-id
           (catch 'find-id
@@ -269,9 +252,7 @@ Story description.
 (ert-deftest org-tickets-test--attach-remove-handles-jira-only-attachment ()
   "Test handling of file that exists in Jira but not locally."
   (let* ((local-files '("local.pdf"))
-         (jira-attachments (list
-                            (list (cons "id" "10001") (cons "filename" "jira-only.pdf"))
-                            (list (cons "id" "10002") (cons "filename" "local.pdf"))))
+         (jira-attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"jira-only.pdf\"}, {\"id\": \"10002\", \"filename\": \"local.pdf\"}]"))
          (filename-to-remove "jira-only.pdf")
          (attachment-id
           (catch 'find-id
@@ -285,9 +266,7 @@ Story description.
 (ert-deftest org-tickets-test--attach-remove-deletes-both-when-both-exist ()
   "Test deletion from both Jira and local when file exists in both."
   (let* ((local-files '("both.pdf" "local-only.pdf"))
-         (jira-attachments (list
-                            (list (cons "id" "10001") (cons "filename" "both.pdf"))
-                            (list (cons "id" "10002") (cons "filename" "jira-only.pdf"))))
+         (jira-attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"both.pdf\"}, {\"id\": \"10002\", \"filename\": \"jira-only.pdf\"}]"))
          (filename-to-remove "both.pdf")
          (attachment-id
           (catch 'find-id
@@ -325,22 +304,14 @@ Story description.
 
 (ert-deftest org-tickets-test--get-attachments-from-issue-response ()
   "Test extracting attachments from issue response fields."
-  (let* ((issue-response (list (cons "key" "PROJ-123")
-                               (cons "id" "12345")
-                               (cons "fields" (list (cons "attachment" (list
-                                                                        (list (cons "id" "10001")
-                                                                              (cons "filename" "test.pdf")
-                                                                              (cons "content" "https://example.com/rest/api/3/attachment/content/10001")
-                                                                              (cons "mimeType" "application/pdf")
-                                                                              (cons "size" 12345))
-                                                                        (list (cons "id" "10002")
-                                                                              (cons "filename" "image.png")
-                                                                              (cons "content" "https://example.com/rest/api/3/attachment/content/10002")
-                                                                              (cons "mimeType" "image/png")
-                                                                              (cons "size" 67890)))))))))
-    (let ((fields (cdr (assoc "fields" issue-response))))
+  (let* ((issue-response (org-tickets-test--json "{\"key\": \"PROJ-123\", \"id\": \"12345\", \"fields\": {\"attachment\": [{\"id\": \"10001\", \
+    \"filename\": \"test.pdf\", \"content\": \"https://example.com/rest/api/3/attachment/content/10001\", \
+    \"mimeType\": \"application/pdf\", \"size\": 12345}, {\"id\": \"10002\", \
+    \"filename\": \"image.png\", \"content\": \"https://example.com/rest/api/3/attachment/content/10002\", \
+    \"mimeType\": \"image/png\", \"size\": 67890}]}}")))
+    (let ((fields (org-tickets--alist-get "fields" issue-response)))
       (should fields)
-      (let ((attachments (cdr (assoc "attachment" fields))))
+      (let ((attachments (org-tickets--alist-get "attachment" fields)))
         (should attachments)
         (should (= 2 (length attachments)))
         (should (string= (org-tickets--attachment-id (car attachments)) "10001"))
@@ -352,50 +323,34 @@ Story description.
 
 (ert-deftest org-tickets-test--get-attachments-empty-response ()
   "Test handling of empty issue response."
-  (let* ((issue-response (list (cons "key" "PROJ-123")
-                               (cons "id" "12345")
-                               (cons "fields" (list (cons "attachment" nil))))))
-    (let ((fields (cdr (assoc "fields" issue-response))))
+  (let* ((issue-response (org-tickets-test--json "{\"key\": \"PROJ-123\", \"id\": \"12345\", \"fields\": {\"attachment\": null}}")))
+    (let ((fields (org-tickets--alist-get "fields" issue-response)))
       (should fields)
-      (let ((attachments (cdr (assoc "attachment" fields))))
+      (let ((attachments (org-tickets--alist-get "attachment" fields)))
         (should (null attachments))))))
 
 (ert-deftest org-tickets-test--get-attachments-no-fields ()
   "Test handling of response without fields."
-  (let* ((issue-response (list (cons "key" "PROJ-123")
-                               (cons "id" "12345"))))
-    (let ((fields (cdr (assoc "fields" issue-response))))
+  (let* ((issue-response (org-tickets-test--json "{\"key\": \"PROJ-123\", \"id\": \"12345\"}")))
+    (let ((fields (org-tickets--alist-get "fields" issue-response)))
       (should (null fields)))))
 
 (ert-deftest org-tickets-test--get-attachments-response-parsing ()
   "Test that attachment ID can be extracted from issue endpoint response."
-  (let* ((issue-response (list
-                          (cons "expand" "names,schema")
-                          (cons "key" "PROJ-12752")
-                          (cons "id" "108903")
-                          (cons "self" "https://your-domain.atlassian.net/rest/api/3/issue/108903")
-                          (cons "fields" (list
-                                          (cons "summary" "Test story")
-                                          (cons "attachment" (list
-                                                              (list
-                                                               (cons "self" "https://your-domain.atlassian.net/rest/api/3/attachment/10001")
-                                                               (cons "id" "10001")
-                                                               (cons "filename" "screenshot.png")
-                                                               (cons "content" "https://your-domain.atlassian.net/rest/api/3/attachment/content/10001")
-                                                               (cons "thumbnail" "https://your-domain.atlassian.net/rest/api/3/attachment/thumbnail/10001")
-                                                               (cons "mimeType" "image/png")
-                                                               (cons "size" 45678)
-                                                               (cons "created" "2024-10-15T10:30:00.000Z")
-                                                               (cons "author" (list (cons "accountId" "123456789")
-                                                                                    (cons "displayName" "Test User")))))))))))
-    (let ((attachments (cdr (assoc "attachment" (cdr (assoc "fields" issue-response))))))
+  (let* ((issue-response (org-tickets-test--json "{\"expand\": \"names,schema\", \"key\": \"PROJ-12752\", \"id\": \"108903\", \"self\": \"https://your-domain.atlassian.net/rest/api/3/issue/108903\", \
+    \"fields\": {\"summary\": \"Test story\", \"attachment\": [{\"self\": \"https://your-domain.atlassian.net/rest/api/3/attachment/10001\", \
+    \"id\": \"10001\", \"filename\": \"screenshot.png\", \"content\": \"https://your-domain.atlassian.net/rest/api/3/attachment/content/10001\", \
+    \"thumbnail\": \"https://your-domain.atlassian.net/rest/api/3/attachment/thumbnail/10001\", \
+    \"mimeType\": \"image/png\", \"size\": 45678, \"created\": \"2024-10-15T10:30:00.000Z\", \
+    \"author\": {\"accountId\": \"123456789\", \"displayName\": \"Test User\"}}]}}")))
+    (let ((attachments (org-tickets--issue-attachments issue-response)))
       (should attachments)
       (let ((attachment (car attachments)))
         (should (string= (org-tickets--attachment-id attachment) "10001"))
         (should (string= (org-tickets--attachment-filename attachment) "screenshot.png"))
         (should (string= (org-tickets--attachment-content-url attachment)
                          "https://your-domain.atlassian.net/rest/api/3/attachment/content/10001"))
-        (should (equal (cdr (assoc "size" attachment)) 45678))))))
+        (should (equal (org-tickets--alist-get "size" attachment) 45678))))))
 
 (ert-deftest org-tickets-test--get-attachments-parses-real-response-shape ()
   "json.el produces SYMBOL keys; (assoc \"fields\" ...) matched nothing,
@@ -448,7 +403,7 @@ The caller passes in the Jira attachments list; dedup is done without an extra A
   (let* ((attach-dir (expand-file-name (format "test-attach-%s" (gensym)) temporary-file-directory))
          (uploaded-files nil)
          (jira-attachments
-          (list (list (cons "id" "10001") (cons "filename" "existing.pdf")))))
+          (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"existing.pdf\"}]")))
     (make-directory attach-dir t)
     ;; Create one file that exists in Jira and one that doesn't
     (with-temp-file (expand-file-name "existing.pdf" attach-dir) (insert "existing"))

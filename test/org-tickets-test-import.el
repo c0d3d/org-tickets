@@ -40,24 +40,10 @@
 
 (ert-deftest org-tickets-test--adf-import-list-followed-by-paragraph ()
   "Test that paragraph after list stays after list in org output."
-  (let* ((adf (list (cons "type" "doc")
-                    (cons "content"
-                          (list
-                           (list
-                            (cons "type" "bulletList")
-                            (cons "content"
-                                  (list
-                                   (list (cons "type" "listItem")
-                                         (cons "content"
-                                               (list (list (cons "type" "paragraph")
-                                                           (cons "content"
-                                                                 (list (list (cons "type" "text")
-                                                                             (cons "text" "List item")))))))))))
-                           (list
-                            (cons "type" "paragraph")
-                            (cons "content"
-                                  (list (list (cons "type" "text")
-                                              (cons "text" "Text after list")))))))))
+  (let* ((adf (org-tickets-test--json "{\"type\": \"doc\", \"content\": [{\"type\": \"bulletList\", \"content\": [{\"type\": \"listItem\", \
+    \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \
+    \"text\": \"List item\"}]}]}]}, {\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \
+    \"text\": \"Text after list\"}]}]}"))
          (result (org-tickets--parse-adf-description adf))
          (list-pos (string-match-p "List item" result))
          (para-pos (string-match-p "Text after list" result)))
@@ -174,81 +160,39 @@
   "Test that mediaInline ADF nodes import as [[attachment:filename]] links."
   (let* ((id-map (list (cons "att-uuid-123" "design.pdf")
                        (cons "att-uuid-456" "report.xlsx")))
-         (adf (list (cons "type" "doc")
-                    (cons "version" 1)
-                    (cons "content"
-                          (list (list (cons "type" "paragraph")
-                                      (cons "content"
-                                            (list (list (cons "type" "text")
-                                                        (cons "text" "See "))
-                                                  (list (cons "type" "mediaInline")
-                                                        (cons "attrs"
-                                                              (list (cons "id" "att-uuid-123")
-                                                                    (cons "collection" "")
-                                                                    (cons "type" "file"))))
-                                                  (list (cons "type" "text")
-                                                        (cons "text" " for details"))))))))))
+         (adf (org-tickets-test--json "{\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \
+    \"text\": \"See \"}, {\"type\": \"mediaInline\", \"attrs\": {\"id\": \"att-uuid-123\", \
+    \"collection\": \"\", \"type\": \"file\"}}, {\"type\": \"text\", \"text\": \" for details\"}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf id-map)))
       (should (string-match-p "\\[\\[attachment:design\\.pdf\\]\\]" result)))))
 
 (ert-deftest org-tickets-test--adf-import-media-single-as-attachment-link ()
   "Test that mediaSingle ADF nodes import as [[attachment:filename]] links when ID is known."
   (let* ((id-map (list (cons "abc123" "screenshot.png")))
-         (adf (list (cons "type" "doc")
-                    (cons "version" 1)
-                    (cons "content"
-                          (list (list (cons "type" "mediaSingle")
-                                      (cons "attrs" (list (cons "width" 800) (cons "layout" "align-start")))
-                                      (cons "content"
-                                            (list (list (cons "type" "media")
-                                                        (cons "attrs" (list (cons "type" "file")
-                                                                            (cons "id" "abc123")
-                                                                            (cons "collection" ""))))))))))))
+         (adf (org-tickets-test--json "{\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"mediaSingle\", \
+    \"attrs\": {\"width\": 800, \"layout\": \"align-start\"}, \"content\": [{\"type\": \"media\", \
+    \"attrs\": {\"type\": \"file\", \"id\": \"abc123\", \"collection\": \"\"}}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf id-map)))
       (should (string-match-p "\\[\\[attachment:screenshot\\.png\\]\\]" result)))))
 
 (ert-deftest org-tickets-test--adf-import-media-single-unknown-id-fallback ()
   "Test that mediaSingle falls back to [media: id] when attachment ID is unknown."
-  (let* ((adf (list (cons "type" "doc")
-                    (cons "version" 1)
-                    (cons "content"
-                          (list (list (cons "type" "mediaSingle")
-                                      (cons "content"
-                                            (list (list (cons "type" "media")
-                                                        (cons "attrs" (list (cons "type" "file")
-                                                                            (cons "id" "unknown-id")
-                                                                            (cons "collection" ""))))))))))))
+  (let* ((adf (org-tickets-test--json "{\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"mediaSingle\", \
+    \"content\": [{\"type\": \"media\", \"attrs\": {\"type\": \"file\", \"id\": \"unknown-id\", \
+    \"collection\": \"\"}}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "\\[media: unknown-id\\]" result)))))
 
 (ert-deftest org-tickets-test--parse-jira-issue-resolves-media-inline-to-attachment ()
   "Test that parse-jira-issue resolves mediaInline in description to attachment links."
   (let* ((jira-response
-          (list (cons "id" "99999")
-                (cons "key" "PROJ-300")
-                (cons "fields"
-                      (list (cons "issuetype" (list (cons "name" "Story")))
-                            (cons "summary" "Media test")
-                            (cons "description"
-                                  (list (cons "type" "doc")
-                                        (cons "version" 1)
-                                        (cons "content"
-                                              (list (list (cons "type" "paragraph")
-                                                          (cons "content"
-                                                                (list (list (cons "type" "text")
-                                                                            (cons "text" "See "))
-                                                                      (list (cons "type" "mediaInline")
-                                                                            (cons "attrs"
-                                                                                  (list (cons "id" "media-uuid-1")
-                                                                                        (cons "collection" "")
-                                                                                        (cons "type" "file"))))
-                                                                      (list (cons "type" "text")
-                                                                            (cons "text" " here")))))))))
-                            (cons "attachment"
-                                  (list (list (cons "id" "media-uuid-1")
-                                              (cons "filename" "spec.pdf")
-                                              (cons "content" "https://example.com/att/1")
-                                              (cons "size" 1000)))))))))
+          (org-tickets-test--json "{\"id\": \"99999\", \"key\": \"PROJ-300\", \"fields\": {\"issuetype\": {\"name\": \"Story\"}, \
+    \"summary\": \"Media test\", \"description\": {\"type\": \"doc\", \"version\": 1, \
+    \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \
+    \"text\": \"See \"}, {\"type\": \"mediaInline\", \"attrs\": {\"id\": \"media-uuid-1\", \
+    \"collection\": \"\", \"type\": \"file\"}}, {\"type\": \"text\", \"text\": \" here\"}]}]}, \
+    \"attachment\": [{\"id\": \"media-uuid-1\", \"filename\": \"spec.pdf\", \
+    \"content\": \"https://example.com/att/1\", \"size\": 1000}]}}")))
     (let* ((ticket (org-tickets--parse-jira-issue jira-response))
            (desc (org-tickets--ticket-description ticket)))
       (should (string-match-p "\\[\\[attachment:spec\\.pdf\\]\\]" desc)))))
@@ -258,28 +202,12 @@
 Jira Cloud returns numeric id (e.g. \"10234\") in the attachment metadata but
 ADF media nodes reference a UUID.  The mediaApiFileId field bridges the two."
   (let* ((jira-response
-          (list (cons "id" "99999")
-                (cons "key" "PROJ-400")
-                (cons "fields"
-                      (list (cons "issuetype" (list (cons "name" "Story")))
-                            (cons "summary" "UUID media test")
-                            (cons "description"
-                                  (list (cons "type" "doc")
-                                        (cons "version" 1)
-                                        (cons "content"
-                                              (list (list (cons "type" "paragraph")
-                                                          (cons "content"
-                                                                (list (list (cons "type" "mediaInline")
-                                                                            (cons "attrs"
-                                                                                  (list (cons "id" "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-                                                                                        (cons "collection" "")
-                                                                                        (cons "type" "file")))))))))))
-                            (cons "attachment"
-                                  (list (list (cons "id" "10234")
-                                              (cons "filename" "design.png")
-                                              (cons "content" "https://example.com/att/10234")
-                                              (cons "size" 5000)
-                                              (cons "mediaApiFileId" "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))))))))
+          (org-tickets-test--json "{\"id\": \"99999\", \"key\": \"PROJ-400\", \"fields\": {\"issuetype\": {\"name\": \"Story\"}, \
+    \"summary\": \"UUID media test\", \"description\": {\"type\": \"doc\", \
+    \"version\": 1, \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"mediaInline\", \
+    \"attrs\": {\"id\": \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\", \"collection\": \"\", \
+    \"type\": \"file\"}}]}]}, \"attachment\": [{\"id\": \"10234\", \"filename\": \"design.png\", \
+    \"content\": \"https://example.com/att/10234\", \"size\": 5000, \"mediaApiFileId\": \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"}]}}")))
     (let* ((ticket (org-tickets--parse-jira-issue jira-response))
            (desc (org-tickets--ticket-description ticket)))
       (should (string-match-p "\\[\\[attachment:design\\.png\\]\\]" desc)))))
@@ -289,27 +217,12 @@ ADF media nodes reference a UUID.  The mediaApiFileId field bridges the two."
 When neither numeric ID nor mediaApiFileId matches, the alt attribute
 (which Jira sets to the filename) should be used as attachment link."
   (let* ((jira-response
-          (list (cons "id" "99999")
-                (cons "key" "PROJ-401")
-                (cons "fields"
-                      (list (cons "issuetype" (list (cons "name" "Story")))
-                            (cons "summary" "Alt fallback test")
-                            (cons "description"
-                                  (list (cons "type" "doc")
-                                        (cons "version" 1)
-                                        (cons "content"
-                                              (list (list (cons "type" "mediaSingle")
-                                                          (cons "content"
-                                                                (list (list (cons "type" "media")
-                                                                            (cons "attrs"
-                                                                                  (list (cons "id" "no-match-uuid")
-                                                                                        (cons "alt" "image-20260327-164023.png")
-                                                                                        (cons "type" "file")))))))))))
-                            (cons "attachment"
-                                  (list (list (cons "id" "10234")
-                                              (cons "filename" "image-20260327-164023.png")
-                                              (cons "content" "https://example.com/att/10234")
-                                              (cons "size" 3000)))))))))
+          (org-tickets-test--json "{\"id\": \"99999\", \"key\": \"PROJ-401\", \"fields\": {\"issuetype\": {\"name\": \"Story\"}, \
+    \"summary\": \"Alt fallback test\", \"description\": {\"type\": \"doc\", \
+    \"version\": 1, \"content\": [{\"type\": \"mediaSingle\", \"content\": [{\"type\": \"media\", \
+    \"attrs\": {\"id\": \"no-match-uuid\", \"alt\": \"image-20260327-164023.png\", \
+    \"type\": \"file\"}}]}]}, \"attachment\": [{\"id\": \"10234\", \"filename\": \"image-20260327-164023.png\", \
+    \"content\": \"https://example.com/att/10234\", \"size\": 3000}]}}")))
     (let* ((ticket (org-tickets--parse-jira-issue jira-response))
            (desc (org-tickets--ticket-description ticket)))
       (should (string-match-p "\\[\\[attachment:image-20260327-164023\\.png\\]\\]" desc)))))
@@ -319,9 +232,7 @@ When neither numeric ID nor mediaApiFileId matches, the alt attribute
 The Jira API response uses json-object-type 'alist which produces symbol keys,
 but the converter was using string keys with assoc, silently failing."
   (let ((org-tickets--adf-attachments
-         (list (list (cons 'id "10234")
-                     (cons 'filename "spec.pdf")
-                     (cons 'mediaApiFileId "sym-uuid-1")))))
+         (org-tickets-test--json "[{\"id\": \"10234\", \"filename\": \"spec.pdf\", \"mediaApiFileId\": \"sym-uuid-1\"}]")))
     (with-temp-buffer
       (insert "See [[attachment:spec.pdf]]\n")
       (org-mode)

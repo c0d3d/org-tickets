@@ -172,7 +172,7 @@ Jira kept an empty due date until the next sync."
             ("GET" (funcall callback (org-tickets-test--make-get-response) nil))
             ("PUT" (funcall callback nil nil))
             ("POST" (push data post-payloads)
-             (funcall callback (list (cons "key" "P-2")) nil))))
+             (funcall callback (org-tickets-test--json "{\"key\": \"P-2\"}") nil))))
       (with-temp-buffer
         (org-mode)
         (org-tickets-test--insert-feature "Feature" "P-1")
@@ -279,7 +279,7 @@ in Jira -- while `org-tickets-insert-story-template' documented otherwise."
             ("GET" (funcall callback (org-tickets-test--make-get-response) nil))
             ("PUT" (funcall callback nil nil))
             ("POST" (push data post-payloads)
-             (funcall callback (list (cons "key" "P-2")) nil))))
+             (funcall callback (org-tickets-test--json "{\"key\": \"P-2\"}") nil))))
       (with-temp-buffer
         (org-mode)
         (org-tickets-test--insert-feature "Feature" "P-1")
@@ -343,7 +343,7 @@ created in Jira, yet the sync reported success."
             ("GET" (funcall callback (org-tickets-test--make-get-response) nil))
             ("PUT" (funcall callback nil nil))
             ("POST" (push (cdr (assq 'summary (cdr (assq 'fields data)))) created)
-             (funcall callback (list (cons "key" "P-9")) nil))))
+             (funcall callback (org-tickets-test--json "{\"key\": \"P-9\"}") nil))))
       (let ((org-tickets--issue-type-ids
              (list (cons "Feature" "10000") (cons "New Feature" "10000")
                    (cons "Story" "10001") (cons "Task" "10002")
@@ -458,7 +458,7 @@ Every request answers with the new issue key P-9."
         (org-tickets--api-request
          (lambda (method endpoint &optional data)
            (push (list method endpoint data) ,requests)
-           (list (cons 'key "P-9")))))
+           (org-tickets-test--json "{\"key\": \"P-9\"}"))))
      (let ((org-tickets-default-sprint nil)
            (org-tickets-project-id "12345")
            (org-tickets--issue-type-ids '(("Story" . "10001"))))

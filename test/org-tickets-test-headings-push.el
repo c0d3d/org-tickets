@@ -174,8 +174,7 @@ comment blocks; the next sibling headline is still pushed."
 
 (ert-deftest org-tickets-test--headings-attachment-under-heading-is-media ()
   "A standalone attachment link in a heading's section becomes media."
-  (let* ((attachments (list (list (cons "id" "1") (cons "filename" "a.png")
-                                  (cons "mediaApiFileId" "uuid-a"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"1\", \"filename\": \"a.png\", \"mediaApiFileId\": \"uuid-a\"}]"))
          (blocks (cdr (assoc "content"
                              (org-tickets--build-adf-description
                               "*** Shot\n[[attachment:a.png]]" attachments)))))

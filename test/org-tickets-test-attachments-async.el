@@ -256,12 +256,8 @@ url.el sends the file bytes unchanged."
               (org-entry-put (point) "JIRA_KEY" "PROJ-1")
               (org-tickets--async-download-attachments
                "PROJ-1"
-               (list (list (cons "filename" "exists.txt")
-                           (cons "size" 5)
-                           (cons "content" "https://jira.test/exists.txt"))
-                     (list (cons "filename" "new.txt")
-                           (cons "size" 100)
-                           (cons "content" "https://jira.test/new.txt")))
+               (org-tickets-test--json "[{\"filename\": \"exists.txt\", \"size\": 5, \"content\": \"https://jira.test/exists.txt\"}, \
+    {\"filename\": \"new.txt\", \"size\": 100, \"content\": \"https://jira.test/new.txt\"}]")
                (lambda (results err)
                  (setq callback-result (list results err))))))
           ;; Only "new.txt" should be downloaded
@@ -307,7 +303,7 @@ url.el sends the file bytes unchanged."
               (org-tickets--async-upload-attachments
                "PROJ-1"
                ;; Jira already has "existing.txt"
-               (list (list (cons "filename" "existing.txt")))
+               (org-tickets-test--json "[{\"filename\": \"existing.txt\"}]")
                (lambda (results err)
                  (setq callback-result (list results err))))))
           ;; Only "new-file.txt" should be uploaded

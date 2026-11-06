@@ -6,6 +6,7 @@
 
 ;; Load the main library
 (require 'org-tickets)
+(require 'org-tickets-test-fixtures)
 
 ;;;; Description extraction tests
 
@@ -446,24 +447,15 @@ a double 's' suffix."
 (ert-deftest org-tickets-test--parse-sprint-from-jira ()
   "Test parsing Sprint field from Jira response."
   (let* ((jira-response
-          (list (cons "id" 1)
-                (cons "key" "TEST-123")
-                (cons "fields"
-                      (list (cons "summary" "Test")
-                            (cons "issuetype" (list (cons "name" "Task")))
-                            (cons "customfield_10020" (list (list (cons "name" "Sprint 1")
-                                                                  (cons "state" "active"))))))))
+          (org-tickets-test--json "{\"id\": 1, \"key\": \"TEST-123\", \"fields\": {\"summary\": \"Test\", \"issuetype\": {\"name\": \"Task\"}, \
+    \"customfield_10020\": [{\"name\": \"Sprint 1\", \"state\": \"active\"}]}}"))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     (should (string= (org-tickets--ticket-sprint ticket) "Sprint 1"))))
 
 (ert-deftest org-tickets-test--parse-sprint-no-sprint ()
   "Test parsing Jira response with no Sprint field."
   (let* ((jira-response
-          (list (cons "id" 1)
-                (cons "key" "TEST-124")
-                (cons "fields"
-                      (list (cons "summary" "Test")
-                            (cons "issuetype" (list (cons "name" "Task")))))))
+          (org-tickets-test--json "{\"id\": 1, \"key\": \"TEST-124\", \"fields\": {\"summary\": \"Test\", \"issuetype\": {\"name\": \"Task\"}}}"))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     (should (null (org-tickets--ticket-sprint ticket)))))
 
@@ -471,16 +463,9 @@ a double 's' suffix."
   "Test parsing Sprint field when it contains a list of multiple sprints.
 The code should return the first sprint from the list."
   (let* ((jira-response
-          (list (cons "id" 1)
-                (cons "key" "TEST-125")
-                (cons "fields"
-                      (list (cons "summary" "Test")
-                            (cons "issuetype" (list (cons "name" "Task")))
-                            (cons "customfield_10020"
-                                  (list (list (cons "name" "Sprint 1")
-                                              (cons "state" "active"))
-                                        (list (cons "name" "Sprint 2")
-                                              (cons "state" "future"))))))))
+          (org-tickets-test--json "{\"id\": 1, \"key\": \"TEST-125\", \"fields\": {\"summary\": \"Test\", \"issuetype\": {\"name\": \"Task\"}, \
+    \"customfield_10020\": [{\"name\": \"Sprint 1\", \"state\": \"active\"}, \
+    {\"name\": \"Sprint 2\", \"state\": \"future\"}]}}"))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     ;; Should return the first sprint, not the full list
     (should (string= (org-tickets--ticket-sprint ticket) "Sprint 1"))))
@@ -488,12 +473,8 @@ The code should return the first sprint from the list."
 (ert-deftest org-tickets-test--parse-sprint-nil-value ()
   "Test parsing Sprint field when it has a nil value."
   (let* ((jira-response
-          (list (cons "id" 1)
-                (cons "key" "TEST-127")
-                (cons "fields"
-                      (list (cons "summary" "Test")
-                            (cons "issuetype" (list (cons "name" "Task")))
-                            (cons "customfield_10020" nil)))))
+          (org-tickets-test--json "{\"id\": 1, \"key\": \"TEST-127\", \"fields\": {\"summary\": \"Test\", \"issuetype\": {\"name\": \"Task\"}, \
+    \"customfield_10020\": null}}"))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     (should (null (org-tickets--ticket-sprint ticket)))))
 

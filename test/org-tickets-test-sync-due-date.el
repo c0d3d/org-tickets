@@ -6,6 +6,7 @@
 
 ;; Load the main library
 (require 'org-tickets)
+(require 'org-tickets-test-fixtures)
 
 ;;;; Tests for Due Date
 
@@ -29,23 +30,16 @@
 (ert-deftest org-tickets-test--parse-jira-issue-with-due-date ()
   "Test parsing Jira issue with duedate field."
   (let* ((jira-response
-          (list (cons "id" "12345")
-                (cons "key" "PROJ-100")
-                (cons "fields"
-                      (list (cons "summary" "Test Feature")
-                            (cons "issuetype" (list (cons "name" "Feature")))
-                            (cons "duedate" "2026-06-15")))))
+          (org-tickets-test--json "{\"id\": \"12345\", \"key\": \"PROJ-100\", \"fields\": {\"summary\": \"Test Feature\", \
+    \"issuetype\": {\"name\": \"Feature\"}, \"duedate\": \"2026-06-15\"}}"))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     (should (string= (org-tickets--ticket-due-date ticket) "2026-06-15"))))
 
 (ert-deftest org-tickets-test--parse-jira-issue-without-due-date ()
   "Test parsing Jira issue with no duedate field."
   (let* ((jira-response
-          (list (cons "id" "12345")
-                (cons "key" "PROJ-100")
-                (cons "fields"
-                      (list (cons "summary" "Test Feature")
-                            (cons "issuetype" (list (cons "name" "Feature")))))))
+          (org-tickets-test--json "{\"id\": \"12345\", \"key\": \"PROJ-100\", \"fields\": {\"summary\": \"Test Feature\", \
+    \"issuetype\": {\"name\": \"Feature\"}}}"))
          (ticket (org-tickets--parse-jira-issue jira-response)))
     (should (null (org-tickets--ticket-due-date ticket)))))
 

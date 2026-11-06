@@ -137,10 +137,8 @@ the correct heading's org-attach directory, not the referencing ticket's."
          (id-subdir (expand-file-name (org-tickets-test--uuid-attach-path target-id)
                                       attach-dir))
          (downloaded-to (list))
-         (jira-attachments (list (list (cons "id" "10001")
-                                       (cons "filename" "from-jira.pdf")
-                                       (cons "content" "https://example.com/file")
-                                       (cons "size" 100)))))
+         (jira-attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"from-jira.pdf\", \"content\": \"https://example.com/file\", \
+    \"size\": 100}]")))
     (make-directory id-subdir t)
     (unwind-protect
         (org-tickets-test--with-stubs ((org-tickets--async-download-attachment

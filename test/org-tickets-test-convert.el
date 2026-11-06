@@ -379,9 +379,7 @@ instead of a string for nested code elements."
 Regression: Jira renders media nodes only when their id is the Media
 Services UUID (the attachment's mediaApiFileId).  The numeric REST
 attachment id must never be emitted — Jira shows a broken file card."
-  (let* ((attachments (list (list (cons "id" "10001")
-                                  (cons "filename" "design.pdf")
-                                  (cons "mediaApiFileId" "med-uuid-123"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"design.pdf\", \"mediaApiFileId\": \"med-uuid-123\"}]"))
          (content "See [[attachment:design.pdf][design doc]] for details")
          (adf (org-tickets--build-adf-description content attachments)))
     (should adf)
@@ -400,8 +398,7 @@ attachment id must never be emitted — Jira shows a broken file card."
   "An attachment lacking a mediaApiFileId renders as plain text, not media.
 Regression: emitting a media node with the numeric REST attachment id
 produces a permanently broken embed in Jira; plain text degrades safely."
-  (let* ((attachments (list (list (cons "id" "10001")
-                                  (cons "filename" "design.pdf"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"10001\", \"filename\": \"design.pdf\"}]"))
          (content "See [[attachment:design.pdf][design doc]] for details")
          (adf (org-tickets--build-adf-description content attachments)))
     (should adf)
@@ -421,9 +418,7 @@ produces a permanently broken embed in Jira; plain text degrades safely."
   "An attachment link alone in its paragraph becomes a block mediaSingle.
 mediaInline renders as a small file chip; only a mediaSingle > media
 block displays an image inline in the description."
-  (let* ((attachments (list (list (cons "id" "10002")
-                                  (cons "filename" "screenshot.png")
-                                  (cons "mediaApiFileId" "med-uuid-shot"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"10002\", \"filename\": \"screenshot.png\", \"mediaApiFileId\": \"med-uuid-shot\"}]"))
          (content "[[attachment:screenshot.png]]")
          (adf (org-tickets--build-adf-description content attachments))
          (content-list (cdr (assoc "content" adf)))
@@ -441,9 +436,7 @@ block displays an image inline in the description."
 (ert-deftest org-tickets-test--adf-standalone-attachment-between-paragraphs ()
   "A standalone attachment paragraph becomes a mediaSingle between paragraphs.
 Surrounding prose stays in ordinary paragraph nodes."
-  (let* ((attachments (list (list (cons "id" "10002")
-                                  (cons "filename" "screenshot.png")
-                                  (cons "mediaApiFileId" "med-uuid-shot"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"10002\", \"filename\": \"screenshot.png\", \"mediaApiFileId\": \"med-uuid-shot\"}]"))
          (content "Before text\n\n[[attachment:screenshot.png]]\n\nAfter text")
          (adf (org-tickets--build-adf-description content attachments))
          (types (mapcar (lambda (node) (cdr (assoc "type" node)))
@@ -452,8 +445,7 @@ Surrounding prose stays in ordinary paragraph nodes."
 
 (ert-deftest org-tickets-test--adf-attachment-link-unknown-id-falls-back-to-text ()
   "Test that attachment: links render as text when no matching attachment ID is found."
-  (let* ((attachments (list (list (cons "id" "att-other")
-                                  (cons "filename" "other.pdf"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"att-other\", \"filename\": \"other.pdf\"}]"))
          (content "See [[attachment:unknown.pdf]]")
          (adf (org-tickets--build-adf-description content attachments)))
     (should adf)
@@ -479,9 +471,7 @@ Surrounding prose stays in ordinary paragraph nodes."
   "Test that attachment: links survive org -> ADF -> org round-trip.
 The outbound media node carries the media UUID (mediaApiFileId), and the
 import side resolves that same UUID back to the filename."
-  (let* ((attachments (list (list (cons "id" "10042")
-                                  (cons "filename" "notes.pdf")
-                                  (cons "mediaApiFileId" "rt-uuid-1"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"10042\", \"filename\": \"notes.pdf\", \"mediaApiFileId\": \"rt-uuid-1\"}]"))
          (org-content "Check [[attachment:notes.pdf][notes]] please")
          (adf (org-tickets--build-adf-description org-content attachments))
          ;; Build ID→filename map for import side
@@ -491,9 +481,7 @@ import side resolves that same UUID back to the filename."
 
 (ert-deftest org-tickets-test--standalone-attachment-round-trip ()
   "A standalone attachment link survives org -> mediaSingle -> org."
-  (let* ((attachments (list (list (cons "id" "10043")
-                                  (cons "filename" "diagram.png")
-                                  (cons "mediaApiFileId" "rt-uuid-2"))))
+  (let* ((attachments (org-tickets-test--json "[{\"id\": \"10043\", \"filename\": \"diagram.png\", \"mediaApiFileId\": \"rt-uuid-2\"}]"))
          (org-content "[[attachment:diagram.png]]")
          (adf (org-tickets--build-adf-description org-content attachments))
          (result (org-tickets--parse-adf-description

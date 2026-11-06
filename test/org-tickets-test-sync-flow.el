@@ -136,7 +136,7 @@
              ((string= method "PUT")
               (funcall callback nil nil))
              ((string= method "POST")
-              (funcall callback (list (cons "key" "PROJ-NEW")) nil))))
+              (funcall callback (org-tickets-test--json "{\"key\": \"PROJ-NEW\"}") nil))))
         (with-temp-buffer
           (org-mode)
           (org-tickets-test--insert-feature "Feature A" "PROJ-1")
@@ -167,7 +167,7 @@ This produces 3 total batch calls instead of 2 (vs. the single-batch path)."
              ((string= method "PUT")
               (funcall callback nil nil))
              ((string= method "POST")
-              (funcall callback (list (cons "key" "PROJ-NEW")) nil))))
+              (funcall callback (org-tickets-test--json "{\"key\": \"PROJ-NEW\"}") nil))))
         (with-temp-buffer
           (org-mode)
           ;; Feature has no key — triggers sequential path
@@ -233,7 +233,7 @@ This produces 3 total batch calls instead of 2 (vs. the single-batch path)."
       (lambda (method _endpoint callback &optional _data)
         (cond
          ((string= method "POST")
-          (funcall callback (list (cons "key" "PROJ-999")) nil))
+          (funcall callback (org-tickets-test--json "{\"key\": \"PROJ-999\"}") nil))
          ((string= method "PUT")
           (funcall callback nil nil))
          ((string= method "GET")
@@ -273,7 +273,9 @@ This produces 3 total batch calls instead of 2 (vs. the single-batch path)."
             (let ((new-key (if (string-match "PROJ-" (or endpoint ""))
                                "PROJ-NEW-2"
                              "PROJ-NEW-1")))
-              (funcall callback (list (cons "key" new-key)) nil)))))
+              (funcall callback
+                       (org-tickets-test--json (format "{\"key\": \"%s\"}" new-key))
+                       nil)))))
       (with-temp-buffer
         (org-mode)
         ;; Existing feature
@@ -609,7 +611,7 @@ leave the pipeline hung with the buffer stuck read-only."
            ((string= method "POST")
             (if (string-match "issueLink" endpoint)
                 (funcall callback nil nil)
-              (funcall callback (list (cons "key" "PROJ-NEW")) nil)))))
+              (funcall callback (org-tickets-test--json "{\"key\": \"PROJ-NEW\"}") nil)))))
       ;; Ensure no sync API calls happen
       (org-tickets-test--with-stubs ((org-tickets--api-request
                                    (lambda (method endpoint &optional data)
@@ -674,7 +676,10 @@ story's create payload carries no Jira parent field."
                                      (let ((fields (cdr (assq 'fields data))))
                                        (when (equal (cdr (assq 'issuetype fields)) '(("id" . "1")))
                                          (setq story-has-parent (and (assq 'parent fields) t))))
-                                     (funcall callback (list (cons 'key (pop created-keys))) nil)))
+                                     (funcall callback
+                                              (org-tickets-test--json
+                                               (format "{\"key\": \"%s\"}" (pop created-keys)))
+                                              nil)))
                                   ;; Stop the pipeline after phase 1.
                                   (org-tickets--sync-phase-2
                                    (lambda (&rest _))))

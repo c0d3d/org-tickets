@@ -141,10 +141,7 @@ If Feature PROJ-100 has BLOCKED-BY: PROJ-300, that link should be synced."
                                 (org-tickets--async-request
                                  (lambda (method endpoint callback &optional data)
                                    (funcall callback
-                                            (list (cons "fields"
-                                                        (list (cons "attachment" nil)
-                                                              (cons "customfield_10020" nil)
-                                                              (cons "duedate" nil))))
+                                            (org-tickets-test--json "{\"fields\": {\"attachment\": null, \"customfield_10020\": null, \"duedate\": null}}")
                                             nil)))
                                 (org-tickets--async-upload-attachments
                                  (lambda (_key _atts callback) (funcall callback nil nil)))
@@ -185,10 +182,7 @@ This verifies the sync path works from struct data alone, not buffer mutations."
                                 (org-tickets--async-request
                                  (lambda (method endpoint callback &optional data)
                                    (funcall callback
-                                            (list (cons "fields"
-                                                        (list (cons "attachment" nil)
-                                                              (cons "customfield_10020" nil)
-                                                              (cons "duedate" nil))))
+                                            (org-tickets-test--json "{\"fields\": {\"attachment\": null, \"customfield_10020\": null, \"duedate\": null}}")
                                             nil)))
                                 (org-tickets--async-upload-attachments
                                  (lambda (_key _atts callback) (funcall callback nil nil)))

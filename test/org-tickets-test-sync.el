@@ -11,33 +11,12 @@
 ;;;; API Response Tests
 
 (ert-deftest org-tickets-test--api-response-key-extraction ()
-  "Test that Jira API response key extraction uses string keys.
-This is a regression test - json-read-from-string returns alists with string keys,
-not symbols. Using (alist-get 'key result) would fail because it looks for
-the symbol 'key, but the alist has the string \"key\"."
-  ;; Simulate what org-tickets--create-ticket returns - an alist with string keys
-  (let ((api-response (list (cons "key" "PROJ-123") (cons "id" "12345"))))
-    ;; Wrong way - using symbol 'key (this would return nil)
-    (should (null (alist-get 'key api-response)))
-    ;; Correct way - using string "key"
-    (should (string= (cdr (assoc "key" api-response)) "PROJ-123"))))
-
-(ert-deftest org-tickets-test--api-response-key-extraction-symbol-key ()
-  "Test that Jira API response key extraction handles symbol keys.
-This is a regression test - json-read-from-string may return alists with
-symbol keys instead of string keys, depending on Emacs version/settings.
-The code should handle both string and symbol keys using a fallback."
-  ;; Simulate JSON parser returning symbol keys (like 'key instead of "key")
-  (let ((api-response (list (cons (intern "key") "PROJ-12751")
-                            (cons (intern "id") "108903"))))
-    ;; String key lookup fails on symbol-key alist (this is expected)
-    (should (null (cdr (assoc "key" api-response))))
-    ;; Symbol key lookup works
-    (should (string= (cdr (assoc (intern "key") api-response)) "PROJ-12751"))
-    ;; The fallback pattern used in the code handles both cases
-    (should (string= (or (cdr (assoc "key" api-response))
-                         (cdr (assoc (intern-soft "key") api-response)))
-                     "PROJ-12751"))))
+  "Test that the issue key is read from a parsed create response.
+Regression test: json.el produces symbol keys, so a string-key `assoc'
+on the response returns nil; `org-tickets--alist-get' must handle it."
+  (let ((api-response (org-tickets-test--json "{\"key\": \"PROJ-123\", \"id\": \"12345\"}")))
+    (should (null (assoc "key" api-response)))
+    (should (string= (org-tickets--alist-get "key" api-response) "PROJ-123"))))
 
 (ert-deftest org-tickets-test--api-response-parsing ()
   "Test that API response body is properly parsed and returned.
@@ -248,55 +227,12 @@ existing JIRA_KEY (both happened with the old summary-text search)."
 This tests that fixVersions, labels, and issuelinks are handled correctly
 when JSON array-type is set to \\='list."
   (let* ((jira-response
-          (list (cons "id" "12345")
-                (cons "key" "PROJ-11437")
-                (cons "fields"
-                      (list (cons "summary" "Test Feature")
-                            (cons "issuetype" (list (cons "name" "Feature")))
-                            (cons "fixVersions" (list (list (cons "id" "11653")
-                                                            (cons "name" "Aug2025")
-                                                            (cons "description" "")
-                                                            (cons "archived" nil)
-                                                            (cons "released" nil))))
-                            (cons "labels" (list "label1" "label2"))
-                            (cons "customfield_10016" 5)
-                            (cons "issuelinks" (list (list (cons "type" (list (cons "name" "Blocks")
-                                                                              (cons "outward" "blocks")))
-                                                           (cons "outwardIssue" (list (cons "key" "PROJ-200"))))
-                                                     (list (cons "type" (list (cons "name" "Blocks")
-                                                                              (cons "inward" "is blocked by")))
-                                                           (cons "inwardIssue" (list (cons "key" "PROJ-300")))))))))))
-    (let ((ticket (org-tickets--parse-jira-issue jira-response)))
-      (should (string= (org-tickets--ticket-key ticket) "PROJ-11437"))
-      (should (string= (org-tickets--ticket-fix-version ticket) "Aug2025"))
-      (should (equal (org-tickets--ticket-labels ticket) '("label1" "label2")))
-      (should (= (org-tickets--ticket-story-points ticket) 5))
-      (should (member "PROJ-200" (org-tickets--ticket-blocks ticket)))
-      (should (member "PROJ-300" (org-tickets--ticket-blocked-by ticket))))))
-
-(ert-deftest org-tickets-test--parse-jira-issue-with-json-vectors ()
-  "Test parsing Jira issue when JSON arrays are parsed as vectors.
-This tests that fixVersions, labels, and issuelinks are handled correctly
-when JSON array-type is set to 'vector (the default in some Emacs versions)."
-  (let* ((jira-response
-          (list (cons "id" "12345")
-                (cons "key" "PROJ-11437")
-                (cons "fields"
-                      (list (cons "summary" "Test Feature")
-                            (cons "issuetype" (list (cons "name" "Feature")))
-                            (cons "fixVersions" (vector (list (cons "id" "11653")
-                                                              (cons "name" "Aug2025")
-                                                              (cons "description" "")
-                                                              (cons "archived" nil)
-                                                              (cons "released" nil))))
-                            (cons "labels" (vector "label1" "label2"))
-                            (cons "customfield_10016" 5)
-                            (cons "issuelinks" (vector (list (cons "type" (list (cons "name" "Blocks")
-                                                                                (cons "outward" "blocks")))
-                                                             (cons "outwardIssue" (list (cons "key" "PROJ-200"))))
-                                                       (list (cons "type" (list (cons "name" "Blocks")
-                                                                                (cons "inward" "is blocked by")))
-                                                             (cons "inwardIssue" (list (cons "key" "PROJ-300")))))))))))
+          (org-tickets-test--json "{\"id\": \"12345\", \"key\": \"PROJ-11437\", \"fields\": {\"summary\": \"Test Feature\", \
+    \"issuetype\": {\"name\": \"Feature\"}, \"fixVersions\": [{\"id\": \"11653\", \
+    \"name\": \"Aug2025\", \"description\": \"\", \"archived\": null, \"released\": null}], \
+    \"labels\": [\"label1\", \"label2\"], \"customfield_10016\": 5, \"issuelinks\": [{\"type\": {\"name\": \"Blocks\", \
+    \"outward\": \"blocks\"}, \"outwardIssue\": {\"key\": \"PROJ-200\"}}, {\"type\": {\"name\": \"Blocks\", \
+    \"inward\": \"is blocked by\"}, \"inwardIssue\": {\"key\": \"PROJ-300\"}}]}}")))
     (let ((ticket (org-tickets--parse-jira-issue jira-response)))
       (should (string= (org-tickets--ticket-key ticket) "PROJ-11437"))
       (should (string= (org-tickets--ticket-fix-version ticket) "Aug2025"))
@@ -321,39 +257,24 @@ when JSON array-type is set to 'vector (the default in some Emacs versions)."
 (ert-deftest org-tickets-test--parse-adf-marks-code ()
   "Test parsing ADF text with code marks."
   (let ((adf
-         (list (cons "content"
-                     (list
-                      (list (cons "type" "paragraph")
-                            (cons "content"
-                                  (list (list (cons "type" "text")
-                                              (cons "text" "code example")
-                                              (cons "marks" (list (list (cons "type" "code")))))))))))))
+         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"code example\", \
+    \"marks\": [{\"type\": \"code\"}]}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "~code example~" result)))))
 
 (ert-deftest org-tickets-test--parse-adf-marks-strong ()
   "Test parsing ADF text with strong marks."
   (let ((adf
-         (list (cons "content"
-                     (list
-                      (list (cons "type" "paragraph")
-                            (cons "content"
-                                  (list (list (cons "type" "text")
-                                              (cons "text" "bold text")
-                                              (cons "marks" (list (list (cons "type" "strong")))))))))))))
+         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"bold text\", \
+    \"marks\": [{\"type\": \"strong\"}]}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "\\*bold text\\*" result)))))
 
 (ert-deftest org-tickets-test--parse-adf-marks-emphasis ()
   "Test parsing ADF text with emphasis marks."
   (let ((adf
-         (list (cons "content"
-                     (list
-                      (list (cons "type" "paragraph")
-                            (cons "content"
-                                  (list (list (cons "type" "text")
-                                              (cons "text" "italic text")
-                                              (cons "marks" (list (list (cons "type" "emphasis")))))))))))))
+         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"italic text\", \
+    \"marks\": [{\"type\": \"emphasis\"}]}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "/italic text/" result)))))
 
@@ -361,64 +282,38 @@ when JSON array-type is set to 'vector (the default in some Emacs versions)."
   "Test parsing ADF text with 'em' mark type (used in export).
 This tests round-trip: export uses 'em', import should also handle 'em'."
   (let ((adf
-         (list (cons "content"
-                     (list
-                      (list (cons "type" "paragraph")
-                            (cons "content"
-                                  (list (list (cons "type" "text")
-                                              (cons "text" "italic text")
-                                              (cons "marks" (list (list (cons "type" "em")))))))))))))
+         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"italic text\", \
+    \"marks\": [{\"type\": \"em\"}]}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "/italic text/" result)))))
 
 (ert-deftest org-tickets-test--parse-adf-marks-link ()
   "Test parsing ADF text with link marks - should produce proper org links."
   (let ((adf
-         (list (cons "content"
-                     (list
-                      (list (cons "type" "paragraph")
-                            (cons "content"
-                                  (list (list (cons "type" "text")
-                                              (cons "text" "click here")
-                                              (cons "marks" (list (list (cons "type" "link")
-                                                                        (cons "attrs" (list (cons "href" "https://example.com")))))))))))))))
+         (org-tickets-test--json "{\"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"click here\", \
+    \"marks\": [{\"type\": \"link\", \"attrs\": {\"href\": \"https://example.com\"}}]}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "\\[\\[https://example\\.com\\]\\[click here\\]\\]" result)))))
 
 (ert-deftest org-tickets-test--parse-adf-media-single ()
   "Test that mediaSingle with alt falls back to attachment link."
   (let ((adf
-         (list (cons "content"
-                     (list
-                      (list (cons "type" "mediaSingle")
-                            (cons "attrs" (list (cons "width" 800) (cons "layout" "align-start")))
-                            (cons "content"
-                                  (list (list (cons "type" "media")
-                                              (cons "attrs" (list (cons "type" "file")
-                                                                  (cons "id" "abc123")
-                                                                  (cons "alt" "screenshot.png")
-                                                                  (cons "collection" ""))))))))))))
+         (org-tickets-test--json "{\"content\": [{\"type\": \"mediaSingle\", \"attrs\": {\"width\": 800, \"layout\": \"align-start\"}, \
+    \"content\": [{\"type\": \"media\", \"attrs\": {\"type\": \"file\", \"id\": \"abc123\", \
+    \"alt\": \"screenshot.png\", \"collection\": \"\"}}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "\\[\\[attachment:screenshot\\.png\\]\\]" result)))))
 
 (ert-deftest org-tickets-test--parse-adf-table-header ()
   "Test parsing ADF table with tableHeader elements."
-  (let* ((text1 (list (cons "type" "text") (cons "text" "Header 1")))
-         (text2 (list (cons "type" "text") (cons "text" "Header 2")))
-         (text3 (list (cons "type" "text") (cons "text" "Cell 1")))
-         (text4 (list (cons "type" "text") (cons "text" "Cell 2")))
-         (para1 (list (cons "type" "paragraph") (cons "content" (list text1))))
-         (para2 (list (cons "type" "paragraph") (cons "content" (list text2))))
-         (para3 (list (cons "type" "paragraph") (cons "content" (list text3))))
-         (para4 (list (cons "type" "paragraph") (cons "content" (list text4))))
-         (header1 (list (cons "type" "tableHeader") (cons "content" (list para1))))
-         (header2 (list (cons "type" "tableHeader") (cons "content" (list para2))))
-         (cell1 (list (cons "type" "tableCell") (cons "content" (list para3))))
-         (cell2 (list (cons "type" "tableCell") (cons "content" (list para4))))
-         (row1 (list (cons "type" "tableRow") (cons "content" (list header1 header2))))
-         (row2 (list (cons "type" "tableRow") (cons "content" (list cell1 cell2))))
-         (table (list (cons "type" "table") (cons "content" (list row1 row2))))
-         (adf (list (cons "content" (list table)))))
+  (let* ((adf (org-tickets-test--json
+               "{\"content\": [{\"type\": \"table\", \"content\": [
+                  {\"type\": \"tableRow\", \"content\": [
+                    {\"type\": \"tableHeader\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Header 1\"}]}]},
+                    {\"type\": \"tableHeader\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Header 2\"}]}]}]},
+                  {\"type\": \"tableRow\", \"content\": [
+                    {\"type\": \"tableCell\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Cell 1\"}]}]},
+                    {\"type\": \"tableCell\", \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"Cell 2\"}]}]}]}]}]}")))
     (let ((result (org-tickets--parse-adf-description adf)))
       (should (string-match-p "Header 1" result))
       (should (string-match-p "Header 2" result))

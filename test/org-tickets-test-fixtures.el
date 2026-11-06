@@ -114,16 +114,19 @@ All side-effectful helpers (attachments, links, config) are stubbed out."
        ,@body)))
 
 (defun org-tickets-test--make-get-response (&optional sprint due-date)
-  "Build a fake GET /issue response plist.
-SPRINT is an optional sprint name string.
+  "Build a parsed GET /issue response from JSON.
+SPRINT is an optional sprint name string, placed under
+`org-tickets-sprint-field' as an array of sprint objects.
 DUE-DATE is an optional due date string."
-  (let ((fields (list (cons "attachment" nil)
-                      (cons "duedate" due-date)
-                      (cons "customfield_10020"
-                            (when sprint
-                              (list (list (cons "name" sprint)
-                                          (cons "state" "active"))))))))
-    (list (cons "fields" fields))))
+  (org-tickets-test--json
+   (json-encode
+    `((fields
+       . ((attachment . [])
+          (duedate . ,due-date)
+          (,(intern org-tickets-sprint-field)
+           . ,(if sprint
+                  (vector `((name . ,sprint) (state . "active")))
+                nil))))))))
 
 (defun org-tickets-test--insert-feature (title key)
   "Insert a Feature heading with TITLE and KEY at current point."
