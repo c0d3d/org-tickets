@@ -90,6 +90,9 @@ When a test file exceeds 750 lines, split by category (e.g., `org-tickets-test-a
   starts from an empty `org-tickets--credentials-cache` and stubs
   `auth-source-search` with a fixed login, so even `org-tickets--resolve-config`
   runs for real and no test reads `~/.authinfo`. Every harness below uses it.
+  The one test that needs auth-source's real caching
+  (`rotated-authinfo-token-used-next-command`) instead binds `auth-sources`
+  to a temp authinfo file it writes itself.
 
 ### Fake Jira (`org-tickets-test-fixtures.el`)
 
