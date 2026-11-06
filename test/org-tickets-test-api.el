@@ -322,8 +322,8 @@ sprint functions previously used string keys with assoc, silently failing."
         (should (equal (mapcar #'car sprints) '("Sprint 1" "Sprint 2")))
         (should (= (cdar sprints) 3453))))))
 
-(ert-deftest org-tickets-test--sprint-cache-is-cleared-between-syncs ()
-  "Test that the sprint cache is cleared between sync sessions."
+(ert-deftest org-tickets-test--clear-sprint-cache-empties-cache ()
+  "Clearing the sprint cache leaves it empty."
   (let ((org-tickets--sprint-cache '(("Old Sprint" . "3453"))))
     (org-tickets--clear-sprint-cache)
     (should (null org-tickets--sprint-cache))))

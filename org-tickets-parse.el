@@ -181,19 +181,25 @@ are part of the description and push as ADF headings."
           (setq end (point))))
       (or end limit))))
 
+(defun org-tickets--description-begin (element)
+  "Return where the description of heading ELEMENT at point begins.
+That is the end of the property drawer's :END: line, or ELEMENT's
+contents start when it has no drawer."
+  (let ((drawer (org-get-property-block)))
+    (if drawer
+        (save-excursion (goto-char (cdr drawer)) (line-end-position))
+      (org-element-property :contents-begin element))))
+
 (defun org-tickets--description-region ()
   "Return (BEG . END) of the description of the ticket heading at point.
-BEG is the end of the property drawer's :END: line, or the start of the
-entry's contents when it has no drawer; END is `org-tickets--description-end'.
-Nil when the heading has no contents.  Point is not moved."
+BEG is `org-tickets--description-begin'; END is
+`org-tickets--description-end'.  Nil when the heading has no contents.
+Point is not moved."
   (save-excursion
     (org-back-to-heading t)
-    (let ((element (org-element-at-point))
-          (drawer (org-get-property-block)))
+    (let ((element (org-element-at-point)))
       (when (org-element-property :contents-begin element)
-        (cons (if drawer
-                  (save-excursion (goto-char (cdr drawer)) (line-end-position))
-                (org-element-property :contents-begin element))
+        (cons (org-tickets--description-begin element)
               (org-tickets--description-end
                (org-element-property :contents-end element)))))))
 
@@ -226,6 +232,13 @@ never the heading itself."
 
 ;;;; Issue types keyword
 
+(defun org-tickets--parse-issue-type-pair (pair)
+  "Parse PAIR, a \"NAME=ID\" string, into (NAME . ID), or nil if malformed."
+  (when (string-match "\\(.+\\)=\\(.+\\)" pair)
+    (let ((name (match-string-no-properties 1 pair))
+          (id (match-string-no-properties 2 pair)))
+      (cons (string-trim name) (string-trim id)))))
+
 (defun org-tickets--load-issue-types ()
   "Return the issue types in the #+JIRA_ISSUE_TYPES keyword, or nil.
 The keyword holds \"NAME=ID\" pairs separated by commas; the result is an
@@ -233,12 +246,7 @@ alist of (NAME . ID) strings.  Point is left alone and keywords inside
 src blocks are ignored."
   (let ((raw (cadar (org-collect-keywords '("JIRA_ISSUE_TYPES")))))
     (unless (or (null raw) (string= raw ""))
-      (mapcar (lambda (pair)
-                (when (string-match "\\(.+\\)=\\(.+\\)" pair)
-                  (let ((name (match-string-no-properties 1 pair))
-                        (id (match-string-no-properties 2 pair)))
-                    (cons (string-trim name) (string-trim id)))))
-              (split-string raw "," t)))))
+      (mapcar #'org-tickets--parse-issue-type-pair (split-string raw "," t)))))
 
 (defun org-tickets--format-issue-types (issue-types)
   "Format ISSUE-TYPES, an alist of (NAME . ID), as a #+JIRA_ISSUE_TYPES line."

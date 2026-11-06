@@ -27,8 +27,7 @@
 
 (require 'org-tickets-api)
 (require 'org-tickets-async)
-
-(declare-function org-tickets--find-ticket-by-key "org-tickets-parse")
+(require 'org-tickets-parse)
 
 ;;;; Async Download
 

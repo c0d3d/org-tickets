@@ -82,8 +82,8 @@ Returns nil when the fetch fails."
 Only properties in `org-tickets--remote-inherited-fields' are looked up."
   (let ((extract (cdr (assoc property org-tickets--remote-inherited-fields))))
     (when extract
-      (let ((value (funcall extract (org-tickets--remote-parent-issue parent-key))))
-        (and (stringp value) (not (string-blank-p value)) value)))))
+      (org-tickets--non-empty-string
+       (funcall extract (org-tickets--remote-parent-issue parent-key))))))
 
 (defun org-tickets--ancestor-property (property)
   "Return PROPERTY of the nearest ancestor ticket heading carrying it, or nil."

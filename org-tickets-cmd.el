@@ -223,9 +223,7 @@ and you need to sync those changes into your local org buffer."
 
 (defun org-tickets--browse-url (ticket-key)
   "Return the Jira browse URL for TICKET-KEY, or signal if no base URL is set."
-  (unless org-tickets-base-url
-    (user-error "`org-tickets-base-url' is not set; customize it or set it in your init file"))
-  (concat org-tickets-base-url "/browse/" ticket-key))
+  (concat (org-tickets--base-url) "/browse/" ticket-key))
 
 (defun org-tickets--copy-ticket-link-to-clipboard (ticket-key)
   "Copy Jira ticket link for TICKET-KEY to clipboard."
@@ -240,7 +238,7 @@ and you need to sync those changes into your local org buffer."
   "Copy the Jira browse link for the ticket at point."
   (interactive)
   (let ((key (org-tickets--at-ticket-heading (org-entry-get (point) "JIRA_KEY"))))
-    (unless (and key (> (length key) 0))
+    (unless (org-tickets--non-empty-string key)
       (user-error "No JIRA_KEY property on this heading"))
     (org-tickets--copy-ticket-link-to-clipboard key)))
 

@@ -49,8 +49,10 @@ org-tickets.el → org-tickets-core.el → [all other modules] → org-tickets-c
 ```
 
 Each module `require`s only modules below it; there are no require cycles
-(`deps.mk`, generated from the `require` lines, orders compilation).  The
-sync stack layers as:
+(`deps.mk`, generated from the `require` lines, orders compilation).  One
+call dependency still runs upward: `api` requires `fields`, and `fields`
+calls `org-tickets--resolve-sprint-value` in `api` through a
+`declare-function` rather than a `require`.  The sync stack layers as:
 
 ```
 links, inherit → sync-phases → sync → cmd
