@@ -165,6 +165,21 @@ re-read reaches the file rather than a cached search result."
       (org-tickets--save-issue-types '(("Story" . "2")))
       (should-not (string-match-p "\n\n\n" (buffer-string))))))
 
+(ert-deftest org-tickets-test--save-issue-types-while-narrowed ()
+  "Saving while narrowed to a ticket rewrites the one keyword line at the top.
+The narrowing is left as it was."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+JIRA_ISSUE_TYPES: Story=1\n* A\nbody A\n* B\nbody B\n")
+    (goto-char (point-min))
+    (re-search-forward "^\\* B")
+    (org-narrow-to-subtree)
+    (org-tickets--save-issue-types '(("Story" . "2")))
+    (should (equal (buffer-string) "* B\nbody B\n"))
+    (widen)
+    (should (equal (buffer-string)
+                   "#+JIRA_ISSUE_TYPES: Story=2\n* A\nbody A\n* B\nbody B\n"))))
+
 (defconst org-tickets-test--createmeta-json
   "{\"projects\": [{\"issuetypes\": [
      {\"name\": \"Story\", \"id\": \"10001\"},

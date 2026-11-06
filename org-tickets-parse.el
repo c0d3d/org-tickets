@@ -253,13 +253,14 @@ src blocks are ignored."
 (defun org-tickets--save-issue-types (issue-types)
   "Write ISSUE-TYPES, an alist of (NAME . ID), to the #+JIRA_ISSUE_TYPES line.
 Replaces an existing line in place (kill ring untouched) or inserts one
-at the top of the buffer.  Point is preserved."
-  (save-excursion
-    (goto-char (point-min))
-    (if (re-search-forward "^#\\+JIRA_ISSUE_TYPES:.*$" nil t)
-        (replace-match (org-tickets--format-issue-types issue-types) t t)
-      (goto-char (point-min))
-      (insert (org-tickets--format-issue-types issue-types) "\n"))))
+at the top of the buffer.  Any narrowing is ignored and kept.  Point is
+preserved."
+  (org-with-wide-buffer
+   (goto-char (point-min))
+   (if (re-search-forward "^#\\+JIRA_ISSUE_TYPES:.*$" nil t)
+       (replace-match (org-tickets--format-issue-types issue-types) t t)
+     (goto-char (point-min))
+     (insert (org-tickets--format-issue-types issue-types) "\n"))))
 
 (provide 'org-tickets-parse)
 
