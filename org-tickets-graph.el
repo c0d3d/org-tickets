@@ -225,6 +225,19 @@ first id appears in EDGES."
   :type 'natnum
   :group 'org-tickets)
 
+(defcustom org-tickets-graph-type-colors
+  '(("Story" "#deebf7" "#2e75b6")
+    ("Task" "#e2f0d9" "#548235")
+    ("Bug" "#fbe3e0" "#c0392b")
+    ("Spike" "#ede4f5" "#7030a0")
+    ("Merge" "#e0f2f1" "#00897b"))
+  "Fill and border colors of non-parent ticket boxes, by issue type.
+Each entry is (TYPE FILL BORDER).  Unlisted types use a white box."
+  :type '(repeat (list (string :tag "Issue type")
+                       (color :tag "Fill")
+                       (color :tag "Border")))
+  :group 'org-tickets)
+
 (defun org-tickets--graph-html-escape (text)
   "Return TEXT with `&', `<', `>' and `\"' escaped for a Graphviz HTML label."
   (replace-regexp-in-string
@@ -266,7 +279,7 @@ first id appears in EDGES."
                               (org-tickets--graph-truncate
                                (or (plist-get node :title) "")))
                              (when (plist-get node :due)
-                               (format "<FONT POINT-SIZE=\"10\">due %s</FONT>"
+                               (format "<FONT POINT-SIZE=\"10\" COLOR=\"#555555\">Due %s</FONT>"
                                        (org-tickets--graph-html-escape
                                         (plist-get node :due))))))
                  "<BR/>")
@@ -283,7 +296,21 @@ first id appears in EDGES."
             "peripheries=2, fontsize=15, margin=\"0.3,0.15\""
             (when (plist-get node :new-p)
               ", style=\"rounded,filled,dashed\"")))
-   ((plist-get node :new-p) "style=\"rounded,filled,dashed\"")))
+   (t (org-tickets--graph-type-style node))))
+
+(defun org-tickets--graph-type-style (node)
+  "Return the type-colored DOT style for a plain ticket NODE, or nil."
+  (let ((colors (cdr (assoc (plist-get node :type)
+                            org-tickets-graph-type-colors))))
+    (when (or colors (plist-get node :new-p))
+      (mapconcat #'identity
+                 (delq nil
+                       (list (when colors
+                               (format "fillcolor=\"%s\", color=\"%s\", penwidth=1.5"
+                                       (car colors) (cadr colors)))
+                             (when (plist-get node :new-p)
+                               "style=\"rounded,filled,dashed\"")))
+                 ", "))))
 
 (defun org-tickets--graph-node-line (node)
   "Return the DOT statement declaring NODE."
@@ -295,11 +322,11 @@ first id appears in EDGES."
 
 (defun org-tickets--graph-edge-line (edge cycle-edges)
   "Return the DOT statement for EDGE, in red when it is in CYCLE-EDGES.
-EDGE is (FROM . TO), written TO -> FROM so that with `dir=back' the
-arrow runs from the blocker FROM up to the blocked TO."
+EDGE is (FROM . TO); the arrow runs down from the blocker FROM to the
+blocked TO."
   (format "%s -> %s%s;"
-          (org-tickets--graph-quote (cdr edge))
           (org-tickets--graph-quote (car edge))
+          (org-tickets--graph-quote (cdr edge))
           (if (member edge cycle-edges)
               " [color=\"#d62728\", penwidth=2.5]"
             "")))
@@ -314,11 +341,14 @@ arrow runs from the blocker FROM up to the blocked TO."
     (concat
      "digraph tickets {\n"
      "  rankdir=TB; nodesep=0.4; ranksep=0.6;\n"
+     "  labelloc=t; labeljust=l; fontname=\"Helvetica\"; fontsize=11; "
+     "label=\"Key: A → B means A blocks B (finish A first); "
+     "work flows down to its feature\";\n"
      "  node [shape=box, style=\"rounded,filled\", fillcolor=\"#ffffff\", "
      "color=\"#888888\", fontname=\"Helvetica\", fontsize=12];\n"
-     "  edge [arrowsize=0.8, color=\"#666666\", dir=back];\n"
+     "  edge [arrowsize=0.8, color=\"#666666\"];\n"
      (when parents
-       (format "  { rank=min; %s }\n"
+       (format "  { rank=max; %s }\n"
                (mapconcat #'org-tickets--graph-node-line parents " ")))
      (mapconcat (lambda (node) (concat "  " (org-tickets--graph-node-line node) "\n"))
                 others "")

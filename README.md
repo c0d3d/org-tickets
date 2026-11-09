@@ -184,13 +184,15 @@ when the buffer is narrowed.  The buffer must be saved to a file, and
 cannot be run, the command says so instead of failing.
 
 - Every ticket is a rounded box with its key in bold, its heading
-  (without a `Type:` prefix) and its due date when it has one.
+  (without a `Type:` prefix) and its due date when it has one.  Boxes
+  are colored by issue type (`org-tickets-graph-type-colors`).
 - Parent types (Feature, New Feature, Improvement, Epic) are larger,
-  gold, double-outlined and pinned to the top row, labeled like
+  gold, double-outlined and pinned to the bottom row, labeled like
   `FEATURE · PROJ-100`.
 - Tickets without a key show `(new)` and have a dashed border.
-- Arrows run from the blocker to the blocked ticket, so work flows up
-  toward its feature.  They come from `BLOCKS`, `BLOCKED-BY` and each
+- Arrows run from the blocker down to the blocked ticket, so the
+  tickets to start on are at the top and work flows down toward its
+  feature.  A key at the top of the graph says so.  They come from `BLOCKS`, `BLOCKED-BY` and each
   story's parent (its `PARENT` property, else the feature it sits
   under); parent types draw no parent arrow.  A link to a ticket that is not in the file shows as a small
   grey dashed box with just its key.
