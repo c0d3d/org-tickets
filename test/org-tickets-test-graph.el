@@ -301,8 +301,9 @@
 
 (ert-deftest org-tickets-test--graph-dot-has-arrow-key ()
   "The graph carries a key explaining the arrow direction."
-  (should (string-match-p "label=\"Key: A → B means A blocks B"
-                          (org-tickets-test--dot-of nil))))
+  (let ((dot (org-tickets-test--dot-of nil)))
+    (should (string-match-p "labelloc=b; labeljust=r;" dot))
+    (should (string-match-p "A → B</TD><TD ALIGN=\"LEFT\">A blocks B" dot))))
 
 (ert-deftest org-tickets-test--graph-dot-cycle-edges-red ()
   "Edges in a loop are thick red; others are not."

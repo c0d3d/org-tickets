@@ -331,6 +331,14 @@ blocked TO."
               " [color=\"#d62728\", penwidth=2.5]"
             "")))
 
+(defconst org-tickets--graph-legend
+  (concat "<<TABLE BORDER=\"1\" CELLBORDER=\"0\" CELLSPACING=\"0\" "
+          "CELLPADDING=\"3\" COLOR=\"#bbbbbb\" STYLE=\"rounded\">"
+          "<TR><TD COLSPAN=\"2\"><B>Key</B></TD></TR>"
+          "<TR><TD>A → B</TD><TD ALIGN=\"LEFT\">A blocks B (do A first)</TD></TR>"
+          "</TABLE>>")
+  "DOT HTML label for the graph's legend box.")
+
 (defun org-tickets--graph-dot (model)
   "Return the Graphviz DOT text for graph MODEL (see `org-tickets--graph-model')."
   (let* ((nodes (plist-get model :nodes))
@@ -341,9 +349,8 @@ blocked TO."
     (concat
      "digraph tickets {\n"
      "  rankdir=TB; nodesep=0.4; ranksep=0.6;\n"
-     "  labelloc=t; labeljust=l; fontname=\"Helvetica\"; fontsize=11; "
-     "label=\"Key: A → B means A blocks B (finish A first); "
-     "work flows down to its feature\";\n"
+     "  labelloc=b; labeljust=r; fontname=\"Helvetica\"; fontsize=9; "
+     "fontcolor=\"#666666\"; label=" org-tickets--graph-legend ";\n"
      "  node [shape=box, style=\"rounded,filled\", fillcolor=\"#ffffff\", "
      "color=\"#888888\", fontname=\"Helvetica\", fontsize=12];\n"
      "  edge [arrowsize=0.8, color=\"#666666\"];\n"

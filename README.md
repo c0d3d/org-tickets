@@ -192,7 +192,7 @@ cannot be run, the command says so instead of failing.
 - Tickets without a key show `(new)` and have a dashed border.
 - Arrows run from the blocker down to the blocked ticket, so the
   tickets to start on are at the top and work flows down toward its
-  feature.  A key at the top of the graph says so.  They come from `BLOCKS`, `BLOCKED-BY` and each
+  feature.  A small key in the bottom-right corner says so.  They come from `BLOCKS`, `BLOCKED-BY` and each
   story's parent (its `PARENT` property, else the feature it sits
   under); parent types draw no parent arrow.  A link to a ticket that is not in the file shows as a small
   grey dashed box with just its key.
