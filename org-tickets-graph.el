@@ -65,6 +65,13 @@ A ticket's id is its key, or \"new-N\" (N counting from 1) when unkeyed."
   (list :id key :key key :type nil :title nil :due nil
         :parent-p nil :new-p nil :external-p t))
 
+(defun org-tickets--graph-parent-heading-id (headings)
+  "Return the id of the parent-type ticket heading at point, or nil.
+HEADINGS maps each ticket heading position to (ID . TYPE)."
+  (let ((heading (assoc (point) headings)))
+    (when (and heading (org-tickets--parent-type-p (cddr heading)))
+      (cadr heading))))
+
 (defun org-tickets--graph-ancestor-id (ticket headings)
   "Return the id of the nearest parent-type ticket above TICKET, or nil.
 HEADINGS maps each ticket heading position to (ID . TYPE)."
@@ -72,9 +79,7 @@ HEADINGS maps each ticket heading position to (ID . TYPE)."
     (goto-char (org-tickets--ticket-marker ticket))
     (let ((found nil))
       (while (and (not found) (org-up-heading-safe))
-        (let ((heading (assoc (point) headings)))
-          (when (and heading (org-tickets--parent-type-p (cddr heading)))
-            (setq found (cadr heading)))))
+        (setq found (org-tickets--graph-parent-heading-id headings)))
       found)))
 
 (defun org-tickets--graph-ticket-edges (ticket id headings)
@@ -184,9 +189,11 @@ edges inside COMPONENT depth-first."
 
 (defun org-tickets--graph-cycles (edges)
   "Return the dependency loops in the graph of EDGES.
-Each loop is a list of node ids in loop order: a strongly connected
-component of two or more nodes, or a single node with an edge to
-itself.  Loops are ordered by where their first id appears in EDGES."
+Each loop is a strongly connected component of two or more nodes, or
+a single node with an edge to itself.  A simple loop comes back in
+loop order; a larger loop group (several loops sharing nodes) comes
+back in depth-first walk order.  Loops are ordered by where their
+first id appears in EDGES."
   (let* ((vertices (org-tickets--graph-vertices edges))
          (cycles (mapcar (lambda (component)
                            (org-tickets--graph-loop-order component edges vertices))
@@ -206,6 +213,114 @@ itself.  Loops are ordered by where their first id appears in EDGES."
                                    (member (cdr edge) cycle)))
                             cycles))
                 edges)))
+
+;;;; DOT
+
+(defcustom org-tickets-graph-title-width 28
+  "Maximum number of characters of a ticket title shown in the graph."
+  :type 'integer
+  :group 'org-tickets)
+
+(defun org-tickets--graph-html-escape (text)
+  "Return TEXT with `&', `<', `>' and `\"' escaped for a Graphviz HTML label."
+  (replace-regexp-in-string
+   "[&<>\"]"
+   (lambda (char)
+     (pcase char
+       ("&" "&amp;") ("<" "&lt;") (">" "&gt;") (_ "&quot;")))
+   text t t))
+
+(defun org-tickets--graph-truncate (title)
+  "Return TITLE cut to `org-tickets-graph-title-width' characters with an ellipsis."
+  (if (> (length title) org-tickets-graph-title-width)
+      (concat (substring title 0 (1- org-tickets-graph-title-width)) "…")
+    title))
+
+(defun org-tickets--graph-quote (text)
+  "Return TEXT as a double-quoted DOT string."
+  (concat "\"" (replace-regexp-in-string "[\"\\\\]" "\\\\\\&" text) "\""))
+
+(defun org-tickets--graph-heading-text (node)
+  "Return the bold first label line for NODE, as HTML."
+  (let ((key (if (plist-get node :new-p) "(new)" (plist-get node :key))))
+    (format "<B>%s</B>"
+            (org-tickets--graph-html-escape
+             (if (plist-get node :parent-p)
+                 (format "%s · %s" (upcase (plist-get node :type)) key)
+               key)))))
+
+(defun org-tickets--graph-node-label (node)
+  "Return the DOT label attribute value for NODE."
+  (if (plist-get node :external-p)
+      (org-tickets--graph-quote (plist-get node :key))
+    (concat "<" (mapconcat
+                 #'identity
+                 (delq nil
+                       (list (org-tickets--graph-heading-text node)
+                             (org-tickets--graph-html-escape
+                              (org-tickets--graph-truncate
+                               (or (plist-get node :title) "")))
+                             (when (plist-get node :due)
+                               (format "<FONT POINT-SIZE=\"10\">due %s</FONT>"
+                                       (org-tickets--graph-html-escape
+                                        (plist-get node :due))))))
+                 "<BR/>")
+            ">")))
+
+(defun org-tickets--graph-node-style (node)
+  "Return the DOT style attributes (a string) for NODE, or nil for the default."
+  (cond
+   ((plist-get node :external-p)
+    (concat "style=\"rounded,dashed\", fillcolor=\"#ffffff\", "
+            "color=\"#aaaaaa\", fontcolor=\"#888888\", fontsize=10"))
+   ((plist-get node :parent-p)
+    (concat "fillcolor=\"#fff2cc\", color=\"#bf9000\", penwidth=2.5, "
+            "peripheries=2, fontsize=15, margin=\"0.3,0.15\""
+            (when (plist-get node :new-p)
+              ", style=\"rounded,filled,dashed\"")))
+   ((plist-get node :new-p) "style=\"rounded,filled,dashed\"")))
+
+(defun org-tickets--graph-node-line (node)
+  "Return the DOT statement declaring NODE."
+  (format "%s [label=%s%s];"
+          (org-tickets--graph-quote (plist-get node :id))
+          (org-tickets--graph-node-label node)
+          (let ((style (org-tickets--graph-node-style node)))
+            (if style (concat ", " style) ""))))
+
+(defun org-tickets--graph-edge-line (edge cycle-edges)
+  "Return the DOT statement for EDGE, in red when it is in CYCLE-EDGES.
+EDGE is (FROM . TO), written TO -> FROM so that with `dir=back' the
+arrow runs from the blocker FROM up to the blocked TO."
+  (format "%s -> %s%s;"
+          (org-tickets--graph-quote (cdr edge))
+          (org-tickets--graph-quote (car edge))
+          (if (member edge cycle-edges)
+              " [color=\"#d62728\", penwidth=2.5]"
+            "")))
+
+(defun org-tickets--graph-dot (model)
+  "Return the Graphviz DOT text for graph MODEL (see `org-tickets--graph-model')."
+  (let* ((nodes (plist-get model :nodes))
+         (edges (plist-get model :edges))
+         (cycle-edges (org-tickets--graph-cycle-edges edges))
+         (parents (seq-filter (lambda (node) (plist-get node :parent-p)) nodes))
+         (others (seq-remove (lambda (node) (plist-get node :parent-p)) nodes)))
+    (concat
+     "digraph tickets {\n"
+     "  rankdir=TB; nodesep=0.4; ranksep=0.6;\n"
+     "  node [shape=box, style=\"rounded,filled\", fillcolor=\"#ffffff\", "
+     "color=\"#888888\", fontname=\"Helvetica\", fontsize=12];\n"
+     "  edge [arrowsize=0.8, color=\"#666666\", dir=back];\n"
+     (when parents
+       (format "  { rank=min; %s }\n"
+               (mapconcat #'org-tickets--graph-node-line parents " ")))
+     (mapconcat (lambda (node) (concat "  " (org-tickets--graph-node-line node) "\n"))
+                others "")
+     (mapconcat (lambda (edge)
+                  (concat "  " (org-tickets--graph-edge-line edge cycle-edges) "\n"))
+                edges "")
+     "}\n")))
 
 (provide 'org-tickets-graph)
 

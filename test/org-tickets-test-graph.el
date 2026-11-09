@@ -159,6 +159,135 @@
   (should (equal (org-tickets--graph-cycle-edges '(("A" . "A") ("A" . "B")))
                  '(("A" . "A")))))
 
+(ert-deftest org-tickets-test--graph-cycles-two-disjoint-loops ()
+  "Two separate loops are two cycles, and every loop edge is a cycle edge."
+  (let ((edges '(("A" . "B") ("B" . "A") ("C" . "D") ("D" . "C") ("A" . "C"))))
+    (should (= (length (org-tickets--graph-cycles edges)) 2))
+    (should (org-tickets-test--same-set-p
+             (org-tickets--graph-cycle-edges edges)
+             '(("A" . "B") ("B" . "A") ("C" . "D") ("D" . "C"))))))
+
+;;;; DOT
+
+(defun org-tickets-test--dot-node (&rest args)
+  "Return a node plist for DOT tests: ARGS override a plain keyed story."
+  (append args (list :id "PROJ-100" :key "PROJ-100" :type "Story"
+                     :title "Login" :due nil :parent-p nil
+                     :new-p nil :external-p nil)))
+
+(defun org-tickets-test--dot-of (nodes &optional edges)
+  "Return the DOT text for NODES and EDGES."
+  (org-tickets--graph-dot (list :nodes nodes :edges edges)))
+
+(ert-deftest org-tickets-test--graph-dot-parent-node-style-and-rank ()
+  "Parent nodes are gold, double-outlined, larger and ranked to the top."
+  (let ((dot (org-tickets-test--dot-of
+              (list (org-tickets-test--dot-node
+                     :type "Feature" :parent-p t :title "Auth")))))
+    (should (string-match-p "digraph tickets {" dot))
+    (should (string-match-p "rankdir=TB; nodesep=0.4; ranksep=0.6;" dot))
+    (should (string-match-p "{ rank=min; \"PROJ-100\"" dot))
+    (should (string-match-p "fillcolor=\"#fff2cc\"" dot))
+    (should (string-match-p "color=\"#bf9000\", penwidth=2.5, peripheries=2" dot))
+    (should (string-match-p "fontsize=15, margin=\"0.3,0.15\"" dot))
+    (should (string-match-p "<B>FEATURE · PROJ-100</B><BR/>Auth" dot))))
+
+(ert-deftest org-tickets-test--graph-dot-label-key-title-due ()
+  "A node label holds bold key, title and a due line."
+  (let ((dot (org-tickets-test--dot-of
+              (list (org-tickets-test--dot-node :due "2026-12-01")))))
+    (should (string-match-p
+             (regexp-quote "<<B>PROJ-100</B><BR/>Login<BR/><FONT POINT-SIZE=\"10\">due 2026-12-01</FONT>>")
+             dot))))
+
+(ert-deftest org-tickets-test--graph-dot-label-omits-due-when-absent ()
+  "Without a due date there is no due line."
+  (let ((dot (org-tickets-test--dot-of (list (org-tickets-test--dot-node)))))
+    (should (string-match-p (regexp-quote "<<B>PROJ-100</B><BR/>Login>") dot))
+    (should-not (string-match-p "due " dot))))
+
+(ert-deftest org-tickets-test--graph-dot-truncates-long-title ()
+  "Titles over the width are cut to exactly the width, ending in an ellipsis."
+  (let* ((org-tickets-graph-title-width 10)
+         (dot (org-tickets-test--dot-of
+               (list (org-tickets-test--dot-node
+                     :title "A very long ticket title")))))
+    (should (string-match-p (regexp-quote "<BR/>A very lo…>") dot))
+    (should-not (string-match-p "A very long" dot))))
+
+(ert-deftest org-tickets-test--graph-dot-keeps-title-at-width ()
+  "A title exactly at the width is left alone."
+  (let ((org-tickets-graph-title-width 5))
+    (should (string-match-p "<BR/>Login>"
+                            (org-tickets-test--dot-of
+                             (list (org-tickets-test--dot-node)))))))
+
+(ert-deftest org-tickets-test--graph-dot-new-node-dashed-labelled-new ()
+  "A new node shows (new) for its key and has a dashed border."
+  (let ((dot (org-tickets-test--dot-of
+              (list (org-tickets-test--dot-node
+                     :id "new-1" :key nil :new-p t)))))
+    (should (string-match-p "\"new-1\" \\[.*style=\"rounded,filled,dashed\"" dot))
+    (should (string-match-p (regexp-quote "<B>(new)</B>") dot))))
+
+(ert-deftest org-tickets-test--graph-dot-external-node-style ()
+  "An external node is a small grey dashed box labelled with its key only."
+  (let ((dot (org-tickets-test--dot-of
+              (list (org-tickets-test--dot-node
+                     :external-p t :title nil :type nil)))))
+    (should (string-match-p
+             "style=\"rounded,dashed\", fillcolor=\"#ffffff\", color=\"#aaaaaa\", fontcolor=\"#888888\", fontsize=10"
+             dot))
+    (should (string-match-p "label=\"PROJ-100\"" dot))))
+
+(ert-deftest org-tickets-test--graph-dot-edge-points-blocker-to-blocked ()
+  "An edge (FROM . TO) is written TO -> FROM."
+  (let ((dot (org-tickets-test--dot-of nil '(("PROJ-101" . "PROJ-100")))))
+    (should (string-match-p (regexp-quote "\"PROJ-100\" -> \"PROJ-101\"") dot))
+    (should (string-match-p "arrowsize=0.8, color=\"#666666\", dir=back" dot))))
+
+(ert-deftest org-tickets-test--graph-dot-cycle-edges-red ()
+  "Edges in a loop are thick red; others are not."
+  (let ((dot (org-tickets-test--dot-of
+              nil '(("A" . "B") ("B" . "A") ("C" . "A")))))
+    (should (string-match-p
+             "\"B\" -> \"A\" \\[color=\"#d62728\", penwidth=2.5\\]" dot))
+    (should (string-match-p
+             "\"A\" -> \"B\" \\[color=\"#d62728\", penwidth=2.5\\]" dot))
+    (should (string-match-p "\"A\" -> \"C\"[^[]*$" dot))))
+
+(ert-deftest org-tickets-test--graph-dot-escapes-html ()
+  "Special characters in a title are HTML-escaped."
+  (let ((dot (org-tickets-test--dot-of
+              (list (org-tickets-test--dot-node :title "A & <B> \"c\"")))))
+    (should (string-match-p (regexp-quote "A &amp; &lt;B&gt; &quot;c&quot;") dot))))
+
+(ert-deftest org-tickets-test--graph-dot-empty-model-is-valid ()
+  "An empty model yields a digraph with no nodes."
+  (let ((dot (org-tickets-test--dot-of nil)))
+    (should (string-prefix-p "digraph tickets {" dot))
+    (should (string-suffix-p "}" (string-trim dot)))
+    (should-not (string-match-p "->" dot))
+    (should-not (string-match-p "label=" dot))))
+
+(ert-deftest org-tickets-test--graph-dot-accepted-by-graphviz ()
+  "Graphviz renders the DOT for a mixed model to SVG."
+  (unless (executable-find "dot") (ert-skip "dot not installed"))
+  (let ((dot (org-tickets-test--dot-of
+              (list (org-tickets-test--dot-node
+                     :type "Feature" :parent-p t :due "2026-12-01")
+                    (org-tickets-test--dot-node
+                     :id "new-1" :key nil :new-p t :title "A & <B>")
+                    (org-tickets-test--dot-node
+                     :id "PROJ-200" :key "PROJ-200" :external-p t :title nil))
+              '(("new-1" . "PROJ-100") ("PROJ-200" . "new-1")
+                ("new-1" . "PROJ-200")))))
+    (with-temp-buffer
+      (insert dot)
+      (should (= 0 (call-process-region (point-min) (point-max) "dot"
+                                        t t nil "-Tsvg")))
+      (should (string-match-p "<svg" (buffer-string))))))
+
 (provide 'org-tickets-test-graph)
 
 ;;; org-tickets-test-graph.el ends here
