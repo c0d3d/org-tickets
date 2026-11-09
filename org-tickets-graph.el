@@ -179,13 +179,16 @@ Each component is a list of node ids (Kosaraju's algorithm)."
   (or (cdr component)
       (member (cons (car component) (car component)) edges)))
 
+(defun org-tickets--graph-edge-within-p (edge ids)
+  "Non-nil when both ends of EDGE are among IDS."
+  (and (member (car edge) ids) (member (cdr edge) ids)))
+
 (defun org-tickets--graph-loop-order (component edges vertices)
   "Return COMPONENT's ids in loop order along EDGES.
 Starts from the member appearing first in VERTICES and follows the
 edges inside COMPONENT depth-first."
   (let ((inner (seq-filter (lambda (edge)
-                             (and (member (car edge) component)
-                                  (member (cdr edge) component)))
+                             (org-tickets--graph-edge-within-p edge component))
                            edges))
         (start (seq-find (lambda (vertex) (member vertex component)) vertices)))
     (org-tickets--graph-dfs start (org-tickets--graph-adjacency inner)
@@ -208,15 +211,14 @@ first id appears in EDGES."
                    (< (seq-position vertices (car a))
                       (seq-position vertices (car b)))))))
 
-(defun org-tickets--graph-cycle-edges (edges)
-  "Return the EDGES whose ends both lie in the same dependency loop."
-  (let ((cycles (org-tickets--graph-cycles edges)))
-    (seq-filter (lambda (edge)
-                  (seq-some (lambda (cycle)
-                              (and (member (car edge) cycle)
-                                   (member (cdr edge) cycle)))
-                            cycles))
-                edges)))
+(defun org-tickets--graph-cycle-edges (edges cycles)
+  "Return the EDGES whose ends both lie in the same loop of CYCLES.
+CYCLES is as returned by `org-tickets--graph-cycles' for EDGES."
+  (seq-filter (lambda (edge)
+                (seq-some (lambda (cycle)
+                            (org-tickets--graph-edge-within-p edge cycle))
+                          cycles))
+              edges))
 
 ;;;; DOT
 
@@ -285,6 +287,9 @@ Each entry is (TYPE FILL BORDER).  Unlisted types use a white box."
                  "<BR/>")
             ">")))
 
+(defconst org-tickets--graph-new-style "style=\"rounded,filled,dashed\""
+  "DOT style attribute marking a ticket not yet created in Jira.")
+
 (defun org-tickets--graph-node-style (node)
   "Return the DOT style attributes (a string) for NODE, or nil for the default."
   (cond
@@ -295,7 +300,7 @@ Each entry is (TYPE FILL BORDER).  Unlisted types use a white box."
     (concat "fillcolor=\"#fff2cc\", color=\"#bf9000\", penwidth=2.5, "
             "peripheries=2, fontsize=15, margin=\"0.3,0.15\""
             (when (plist-get node :new-p)
-              ", style=\"rounded,filled,dashed\"")))
+              (concat ", " org-tickets--graph-new-style))))
    (t (org-tickets--graph-type-style node))))
 
 (defun org-tickets--graph-type-style (node)
@@ -309,7 +314,7 @@ Each entry is (TYPE FILL BORDER).  Unlisted types use a white box."
                                (format "fillcolor=\"%s\", color=\"%s\", penwidth=1.5"
                                        (car colors) (cadr colors)))
                              (when (plist-get node :new-p)
-                               "style=\"rounded,filled,dashed\"")))
+                               org-tickets--graph-new-style)))
                  ", "))))
 
 (defun org-tickets--graph-node-line (node)
@@ -339,11 +344,12 @@ blocked TO."
           "</TABLE>>")
   "DOT HTML label for the graph's legend box.")
 
-(defun org-tickets--graph-dot (model)
-  "Return the Graphviz DOT text for graph MODEL (see `org-tickets--graph-model')."
+(defun org-tickets--graph-dot (model cycles)
+  "Return the Graphviz DOT text for graph MODEL (see `org-tickets--graph-model').
+CYCLES are MODEL's dependency loops, from `org-tickets--graph-cycles'."
   (let* ((nodes (plist-get model :nodes))
          (edges (plist-get model :edges))
-         (cycle-edges (org-tickets--graph-cycle-edges edges))
+         (cycle-edges (org-tickets--graph-cycle-edges edges cycles))
          (parents (seq-filter (lambda (node) (plist-get node :parent-p)) nodes))
          (others (seq-remove (lambda (node) (plist-get node :parent-p)) nodes)))
     (concat
@@ -378,7 +384,7 @@ blocked TO."
                               (append (cdr cycle) (list (car cycle)))))
        (= (length cycle)
           (seq-count (lambda (edge)
-                       (and (member (car edge) cycle) (member (cdr edge) cycle)))
+                       (org-tickets--graph-edge-within-p edge cycle))
                      edges))))
 
 (defun org-tickets--graph-cycle-text (cycle edges)
@@ -387,16 +393,15 @@ blocked TO."
       (mapconcat #'identity (append cycle (list (car cycle))) " → ")
     (concat "loop among: " (mapconcat #'identity cycle ", "))))
 
-(defun org-tickets--graph-summary (file edges)
-  "Return the echo-area text for graph FILE with EDGES."
-  (let ((cycles (org-tickets--graph-cycles edges)))
-    (if (null cycles)
-        (format "org-tickets: wrote %s — no cycles" file)
-      (format "org-tickets: wrote %s — %d %s: %s" file (length cycles)
-              (if (cdr cycles) "cycles" "cycle")
-              (mapconcat (lambda (cycle)
-                           (org-tickets--graph-cycle-text cycle edges))
-                         cycles "; ")))))
+(defun org-tickets--graph-summary (file cycles edges)
+  "Return the echo-area text for graph FILE with CYCLES, the loops in EDGES."
+  (if (null cycles)
+      (format "org-tickets: wrote %s — no cycles" file)
+    (format "org-tickets: wrote %s — %d %s: %s" file (length cycles)
+            (if (cdr cycles) "cycles" "cycle")
+            (mapconcat (lambda (cycle)
+                         (org-tickets--graph-cycle-text cycle edges))
+                       cycles "; "))))
 
 (defun org-tickets--graph-run-dot (out)
   "Run `org-tickets-graph-dot-program' on the buffer, writing SVG to OUT.
@@ -442,10 +447,12 @@ reports any dependency loops.  Needs Graphviz; see
     (user-error "Cannot find `%s'; install Graphviz or set `org-tickets-graph-dot-program'"
                 org-tickets-graph-dot-program))
   (let* ((model (org-tickets--graph-model))
+         (edges (plist-get model :edges))
+         (cycles (org-tickets--graph-cycles edges))
          (out (concat (file-name-sans-extension buffer-file-name) ".svg")))
-    (org-tickets--graph-render (org-tickets--graph-dot model) out)
+    (org-tickets--graph-render (org-tickets--graph-dot model cycles) out)
     (org-tickets--graph-show out)
-    (message "%s" (org-tickets--graph-summary out (plist-get model :edges)))
+    (message "%s" (org-tickets--graph-summary out cycles edges))
     out))
 
 (provide 'org-tickets-graph)

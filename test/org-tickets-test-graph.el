@@ -183,20 +183,22 @@
 (ert-deftest org-tickets-test--graph-cycle-edges-only-loop-members ()
   "Only edges inside a loop count as cycle edges."
   (should (org-tickets-test--same-set-p
-           (org-tickets--graph-cycle-edges '(("A" . "B") ("B" . "A") ("C" . "A")))
+           (let ((edges '(("A" . "B") ("B" . "A") ("C" . "A"))))
+             (org-tickets--graph-cycle-edges edges (org-tickets--graph-cycles edges)))
            '(("A" . "B") ("B" . "A")))))
 
 (ert-deftest org-tickets-test--graph-cycle-edges-include-self-edges ()
   "A self-edge is a cycle edge."
-  (should (equal (org-tickets--graph-cycle-edges '(("A" . "A") ("A" . "B")))
-                 '(("A" . "A")))))
+  (let ((edges '(("A" . "A") ("A" . "B"))))
+    (should (equal (org-tickets--graph-cycle-edges edges (org-tickets--graph-cycles edges))
+                   '(("A" . "A"))))))
 
 (ert-deftest org-tickets-test--graph-cycles-two-disjoint-loops ()
   "Two separate loops are two cycles, and every loop edge is a cycle edge."
   (let ((edges '(("A" . "B") ("B" . "A") ("C" . "D") ("D" . "C") ("A" . "C"))))
     (should (= (length (org-tickets--graph-cycles edges)) 2))
     (should (org-tickets-test--same-set-p
-             (org-tickets--graph-cycle-edges edges)
+             (org-tickets--graph-cycle-edges edges (org-tickets--graph-cycles edges))
              '(("A" . "B") ("B" . "A") ("C" . "D") ("D" . "C"))))))
 
 ;;;; DOT
@@ -209,7 +211,8 @@
 
 (defun org-tickets-test--dot-of (nodes &optional edges)
   "Return the DOT text for NODES and EDGES."
-  (org-tickets--graph-dot (list :nodes nodes :edges edges)))
+  (org-tickets--graph-dot (list :nodes nodes :edges edges)
+                          (org-tickets--graph-cycles edges)))
 
 (ert-deftest org-tickets-test--graph-dot-parent-node-style-and-rank ()
   "Parent nodes are gold, double-outlined, larger and ranked to the bottom."

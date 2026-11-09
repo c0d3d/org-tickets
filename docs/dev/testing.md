@@ -35,7 +35,7 @@ Test files mirror source modules:
 | `org-tickets-core.el` | `org-tickets-test-record.el` (the `org-tickets--define-record` macro, `--alist-get`, `--ensure-list`), `org-tickets-test-options.el` (the `org-tickets-needs-sizing-label` and `org-tickets-fix-version-months` options) |
 | `org-tickets-api.el` (config, credentials, request encoding, HTTP response parsing, issue types, sprint listing/resolution, issue accessors) | `org-tickets-test-api.el` |
 | `org-tickets-async.el` | `org-tickets-test-async.el` (async requests, batching, rate limiting, progress) |
-| `org-tickets-parse.el` | `org-tickets-test-parse.el` |
+| `org-tickets-parse.el` | `org-tickets-test-parse.el` (descriptions, parent keys, document parsing), `org-tickets-test-parse-properties.el` (validation, sprint, due date, BLOCKED-BY, whitespace and CSV properties) |
 | `org-tickets-fields.el` | `org-tickets-test-fields.el` |
 | `org-tickets-convert.el` | `org-tickets-test-convert.el`, `org-tickets-test-convert-nodes.el`, `org-tickets-test-macro.el` (org macros in descriptions), `org-tickets-test-list-continuation.el` (continuation-line indentation), `org-tickets-test-ordered-start.el` (ordered list start numbers) |
 | `org-tickets-import.el` | `org-tickets-test-import.el` (issue -> ticket -> org, pulling into a heading) |

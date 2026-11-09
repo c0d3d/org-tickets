@@ -10,6 +10,7 @@
 (require 'org-tickets)
 (require 'org-tickets-test-fixtures)
 (require 'org-tickets-test-parse)
+(require 'org-tickets-test-parse-properties)
 (require 'org-tickets-test-sync)
 (require 'org-tickets-test-sync-links)
 (require 'org-tickets-test-sync-sprint)
