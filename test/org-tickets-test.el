@@ -37,6 +37,7 @@
 (require 'org-tickets-test-record)
 (require 'org-tickets-test-options)
 (require 'org-tickets-test-api)
+(require 'org-tickets-test-graph)
 
 (provide 'org-tickets-test)
 

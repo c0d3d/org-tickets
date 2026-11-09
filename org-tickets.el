@@ -53,6 +53,7 @@
 (require 'org-tickets-parse)
 (require 'org-tickets-adf-import)
 (require 'org-tickets-import)
+(require 'org-tickets-graph)
 (require 'org-tickets-links)
 (require 'org-tickets-inherit)
 (require 'org-tickets-sync-phases)

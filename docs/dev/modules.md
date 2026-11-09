@@ -15,6 +15,7 @@ The package is split into logical modules for maintainability.
 | `org-tickets-parse.el` | Parse org buffers into ticket structs, document and ticket extraction, `#+JIRA_ISSUE_TYPES` read/write (`--load-issue-types`, `--save-issue-types`) |
 | `org-tickets-adf-import.el` | ADF-to-org conversion (inline/block/list layers) used by import |
 | `org-tickets-import.el` | Import from Jira, ADF parsing (Jira to org) |
+| `org-tickets-graph.el` | Ticket dependency graph model (`--graph-model`: nodes and blocker-to-blocked edges from BLOCKS, BLOCKED-BY and parents) and loop detection (`--graph-cycles`, `--graph-cycle-edges`) |
 | `org-tickets-links.el` | "Blocks" link creation (`--async-create-link`, per-ticket link thunks), ticket-marker helpers (`--at-ticket-marker`, `--ticket-buffer-key`, `--ticket-parent-key`) |
 | `org-tickets-inherit.el` | DUE_DATE/FIX_VERSION inheritance from the PARENT or ancestor ticket, remote parent cache (`--with-parent-cache`) |
 | `org-tickets-sync-phases.el` | Async sync pipeline: setup/teardown (`--sync-cleanup`), phase 1 (create/update), phase 2 (attachments+links), phase 3 (apply results: `--set-org-*`, `--resolve-blocked-by-in-org`) |

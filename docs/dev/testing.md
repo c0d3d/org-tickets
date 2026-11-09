@@ -42,6 +42,7 @@ Test files mirror source modules:
 | `org-tickets-adf-import.el` | `org-tickets-test-import-adf.el` (ADF -> org text), `org-tickets-test-roundtrip.el` (org<->ADF round-trips) |
 | Description headings (parse, convert, import) | `org-tickets-test-headings-push.el` (org -> ADF, description boundaries), `org-tickets-test-headings-pull.el` (ADF -> org, pulls, round-trips) |
 | `org-tickets-attachments.el` | `org-tickets-test-attachments-upload.el`, `org-tickets-test-attachments-sync.el`, `org-tickets-test-attachments-async.el` |
+| `org-tickets-graph.el` | `org-tickets-test-graph.el` (graph model nodes/edges, loop detection) |
 | `org-tickets-links.el` | `org-tickets-test-sync-links.el` (Blocks link creation and per-ticket link sync) |
 | `org-tickets-inherit.el` | `org-tickets-test-inheritance.el` (DUE_DATE/FIX_VERSION inheritance), `org-tickets-test-sync-due-date.el` (due date in payloads and external parents) |
 | `org-tickets-sync-phases.el` | `org-tickets-test-sync-flow.el` (whole pipeline, phase ordering, buffer protection, key write-back, BLOCKED-BY write-back), `org-tickets-test-sync-flow-phase2.el` (attachment thunks) |
