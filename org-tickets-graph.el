@@ -218,7 +218,7 @@ first id appears in EDGES."
 
 (defcustom org-tickets-graph-title-width 28
   "Maximum number of characters of a ticket title shown in the graph."
-  :type 'integer
+  :type 'natnum
   :group 'org-tickets)
 
 (defun org-tickets--graph-html-escape (text)
@@ -232,9 +232,10 @@ first id appears in EDGES."
 
 (defun org-tickets--graph-truncate (title)
   "Return TITLE cut to `org-tickets-graph-title-width' characters with an ellipsis."
-  (if (> (length title) org-tickets-graph-title-width)
-      (concat (substring title 0 (1- org-tickets-graph-title-width)) "…")
-    title))
+  (let ((width (max 1 org-tickets-graph-title-width)))
+    (if (> (length title) width)
+        (concat (substring title 0 (1- width)) "…")
+      title)))
 
 (defun org-tickets--graph-quote (text)
   "Return TEXT as a double-quoted DOT string."
@@ -321,6 +322,72 @@ arrow runs from the blocker FROM up to the blocked TO."
                   (concat "  " (org-tickets--graph-edge-line edge cycle-edges) "\n"))
                 edges "")
      "}\n")))
+
+;;;; Command
+
+(defcustom org-tickets-graph-dot-program "dot"
+  "Graphviz program used by `org-tickets-graph' to render the graph."
+  :type 'string
+  :group 'org-tickets)
+
+(defun org-tickets--graph-simple-loop-p (cycle edges)
+  "Non-nil when CYCLE's members, taken in order and closed, are all EDGES."
+  (seq-every-p (lambda (pair) (member pair edges))
+               (seq-mapn #'cons cycle (append (cdr cycle) (list (car cycle))))))
+
+(defun org-tickets--graph-cycle-text (cycle edges)
+  "Return a one-line description of CYCLE, a loop in the graph of EDGES."
+  (if (org-tickets--graph-simple-loop-p cycle edges)
+      (mapconcat #'identity (append cycle (list (car cycle))) " → ")
+    (concat "loop among: " (mapconcat #'identity cycle ", "))))
+
+(defun org-tickets--graph-summary (file edges)
+  "Return the echo-area text for graph FILE with EDGES."
+  (let ((cycles (org-tickets--graph-cycles edges)))
+    (if (null cycles)
+        (format "org-tickets: wrote %s — no cycles" file)
+      (format "org-tickets: wrote %s — %d cycle(s): %s" file (length cycles)
+              (mapconcat (lambda (cycle)
+                           (org-tickets--graph-cycle-text cycle edges))
+                         cycles "; ")))))
+
+(defun org-tickets--graph-render (dot out)
+  "Render DOT text to the SVG file OUT with `org-tickets-graph-dot-program'."
+  (with-temp-buffer
+    (insert dot)
+    (unless (zerop (call-process-region (point-min) (point-max)
+                                        org-tickets-graph-dot-program t t nil
+                                        "-Tsvg" "-o" out))
+      (user-error "%s failed: %s" org-tickets-graph-dot-program
+                  (string-trim (buffer-string))))))
+
+(defun org-tickets--graph-show (file)
+  "Display FILE in another window, refreshing any buffer already visiting it."
+  (let ((open (find-buffer-visiting file)))
+    (when open
+      (with-current-buffer open (revert-buffer t t)))
+    (find-file-other-window file)))
+
+;;;###autoload
+(defun org-tickets-graph ()
+  "Draw the ticket dependency graph of this buffer beside its file.
+Writes an SVG next to the org file, shows it in another window, and
+reports any dependency loops.  Needs Graphviz; see
+`org-tickets-graph-dot-program'.  Returns the SVG file name."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an org-mode buffer"))
+  (unless buffer-file-name
+    (user-error "Save the buffer to a file first"))
+  (unless (executable-find org-tickets-graph-dot-program)
+    (user-error "Cannot find `%s'; install Graphviz or set `org-tickets-graph-dot-program'"
+                org-tickets-graph-dot-program))
+  (let* ((model (org-tickets--graph-model))
+         (out (concat (file-name-sans-extension buffer-file-name) ".svg")))
+    (org-tickets--graph-render (org-tickets--graph-dot model) out)
+    (org-tickets--graph-show out)
+    (message "%s" (org-tickets--graph-summary out (plist-get model :edges)))
+    out))
 
 (provide 'org-tickets-graph)
 

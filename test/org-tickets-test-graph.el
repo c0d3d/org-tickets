@@ -254,7 +254,10 @@
              "\"B\" -> \"A\" \\[color=\"#d62728\", penwidth=2.5\\]" dot))
     (should (string-match-p
              "\"A\" -> \"B\" \\[color=\"#d62728\", penwidth=2.5\\]" dot))
-    (should (string-match-p "\"A\" -> \"C\"[^[]*$" dot))))
+    (let ((line (seq-find (lambda (l) (string-match-p "\"A\" -> \"C\"" l))
+                          (split-string dot "\n"))))
+      (should line)
+      (should-not (string-match-p "d62728" line)))))
 
 (ert-deftest org-tickets-test--graph-dot-escapes-html ()
   "Special characters in a title are HTML-escaped."
@@ -287,6 +290,147 @@
       (should (= 0 (call-process-region (point-min) (point-max) "dot"
                                         t t nil "-Tsvg")))
       (should (string-match-p "<svg" (buffer-string))))))
+
+(ert-deftest org-tickets-test--graph-dot-quotes-in-ids-stay-valid ()
+  "Quotes and backslashes in ticket and external keys are escaped in DOT."
+  (let ((dot (org-tickets-test--dot-of
+              (list (org-tickets-test--dot-node :id "P\"1\\x" :key "P\"1\\x")
+                    (org-tickets-test--dot-node
+                     :id "E\"2" :key "E\"2" :external-p t :title nil))
+              '(("E\"2" . "P\"1\\x")))))
+    (should (string-match-p (regexp-quote "\"P\\\"1\\\\x\" [label=") dot))
+    (should (string-match-p (regexp-quote "\"E\\\"2\" [label=\"E\\\"2\"") dot))
+    (should (string-match-p
+             (regexp-quote "\"P\\\"1\\\\x\" -> \"E\\\"2\"") dot))
+    (when (executable-find "dot")
+      (with-temp-buffer
+        (insert dot)
+        (should (= 0 (call-process-region (point-min) (point-max) "dot"
+                                          t t nil "-Tsvg")))))))
+
+(ert-deftest org-tickets-test--graph-dot-title-width-below-one-keeps-one-char ()
+  "A title width of zero or less is treated as one character."
+  (let ((org-tickets-graph-title-width 0))
+    (should (string-match-p "<BR/>…>"
+                            (org-tickets-test--dot-of
+                             (list (org-tickets-test--dot-node)))))))
+
+;;;; Command
+
+(defconst org-tickets-test--graph-loop-text
+  (concat (org-tickets-test--keyed-ticket "*" "Feature" "Checkout" "PROJ-100")
+          (org-tickets-test--keyed-ticket "**" "Story" "Cart" "PROJ-101")
+          (org-tickets-test--keyed-ticket "**" "Story" "Pay" "PROJ-102"
+                                          '("BLOCKS" . "PROJ-103"))
+          (org-tickets-test--keyed-ticket "**" "Story" "Ship" "PROJ-103"
+                                          '("BLOCKS" . "PROJ-102")))
+  "Org text with a feature, stories and a two-ticket loop.")
+
+(defmacro org-tickets-test--with-graph-file (text &rest body)
+  "Run BODY visiting org file \"tickets.org\" holding TEXT, in a spaced temp dir.
+Binds `file' to the file name and `messages' (a list, newest first) to
+what the command echoes.  Windows are not opened; the directory and
+every buffer visiting files in it are removed afterwards."
+  (declare (indent 1))
+  `(let* ((dir (make-temp-file "org tickets graph" t))
+          (file (expand-file-name "tickets.org" dir))
+          (messages nil))
+     (unwind-protect
+         (progn
+           (with-temp-file file (insert ,text))
+           (org-tickets-test--with-stubs
+               ((find-file-other-window
+                 (lambda (f &rest _) (find-file-noselect f)))
+                (message (lambda (fmt &rest args)
+                           (push (apply #'format fmt args) messages))))
+             (with-current-buffer (find-file-noselect file)
+               (unwind-protect (progn ,@body)
+                 (kill-buffer (current-buffer))))))
+       (dolist (buf (buffer-list))
+         (when (and (buffer-file-name buf)
+                    (string-prefix-p dir (buffer-file-name buf)))
+           (with-current-buffer buf (set-buffer-modified-p nil))
+           (kill-buffer buf)))
+       (delete-directory dir t))))
+
+(ert-deftest org-tickets-test--graph-command-requires-file ()
+  "An org buffer that visits no file asks to be saved first."
+  (with-temp-buffer
+    (org-mode)
+    (let ((err (should-error (org-tickets-graph) :type 'user-error)))
+      (should (string-match-p "Save the buffer" (cadr err))))))
+
+(ert-deftest org-tickets-test--graph-command-requires-org-mode ()
+  "Outside org-mode the command refuses."
+  (with-temp-buffer
+    (fundamental-mode)
+    (should-error (org-tickets-graph) :type 'user-error)))
+
+(ert-deftest org-tickets-test--graph-command-missing-dot ()
+  "A missing dot program is reported with the variable to set."
+  (org-tickets-test--with-graph-file ""
+    (let* ((org-tickets-graph-dot-program "no-such-dot-program-xyz")
+           (err (should-error (org-tickets-graph) :type 'user-error)))
+      (should (string-match-p "org-tickets-graph-dot-program" (cadr err)))
+      (should (string-match-p "no-such-dot-program-xyz" (cadr err))))))
+
+(ert-deftest org-tickets-test--graph-command-writes-svg-beside-file ()
+  "The command writes tickets.svg beside the org file and reports the loop."
+  (unless (executable-find "dot") (ert-skip "dot not installed"))
+  (org-tickets-test--with-graph-file org-tickets-test--graph-loop-text
+    (let* ((out (org-tickets-graph))
+           (svg (expand-file-name "tickets.svg" (file-name-directory file))))
+      (should (equal out svg))
+      (should (file-exists-p svg))
+      (with-temp-buffer
+        (insert-file-contents svg)
+        (should (string-match-p "<svg" (buffer-string)))
+        (should (string-match-p "#d62728" (buffer-string))))
+      (should (string-match-p
+               (regexp-quote "1 cycle(s): PROJ-102 → PROJ-103 → PROJ-102")
+               (car messages)))
+      (should (string-match-p (regexp-quote svg) (car messages))))))
+
+(ert-deftest org-tickets-test--graph-command-rerun-refreshes-open-svg ()
+  "Running again updates an already-open SVG buffer without prompting."
+  (unless (executable-find "dot") (ert-skip "dot not installed"))
+  (org-tickets-test--with-graph-file org-tickets-test--graph-loop-text
+    (let ((svg (org-tickets-graph)))
+      (with-current-buffer (find-file-noselect svg)
+        (should-not (string-match-p "Brand New Title" (buffer-string))))
+      (goto-char (point-max))
+      (insert (org-tickets-test--keyed-ticket "*" "Story" "Brand New Title"
+                                              "PROJ-200"))
+      (org-tickets-graph)
+      (with-current-buffer (find-file-noselect svg)
+        (should (string-match-p "Brand New Title" (buffer-string)))))))
+
+(ert-deftest org-tickets-test--graph-command-empty-file ()
+  "A file without tickets still produces an SVG and reports no cycles."
+  (unless (executable-find "dot") (ert-skip "dot not installed"))
+  (org-tickets-test--with-graph-file "* Notes\n"
+    (let ((svg (org-tickets-graph)))
+      (should (file-exists-p svg))
+      (should (string-match-p "no cycles" (car messages))))))
+
+(ert-deftest org-tickets-test--graph-command-dot-failure-reports-stderr ()
+  "A failing dot run signals a user-error carrying its output."
+  (unless (executable-find "false") (ert-skip "false not installed"))
+  (org-tickets-test--with-graph-file org-tickets-test--graph-loop-text
+    (let ((org-tickets-graph-dot-program "false"))
+      (should-error (org-tickets-graph) :type 'user-error))))
+
+(ert-deftest org-tickets-test--graph-cycle-text-formats ()
+  "Simple loops repeat their first id; other groups list members; self-loops."
+  (should (equal (org-tickets--graph-cycle-text
+                  '("A" "B") '(("A" . "B") ("B" . "A")))
+                 "A → B → A"))
+  (should (equal (org-tickets--graph-cycle-text '("A") '(("A" . "A")))
+                 "A → A"))
+  (should (equal (org-tickets--graph-cycle-text
+                  '("A" "B" "C")
+                  '(("A" . "B") ("B" . "A") ("A" . "C") ("C" . "A")))
+                 "loop among: A, B, C")))
 
 (provide 'org-tickets-test-graph)
 

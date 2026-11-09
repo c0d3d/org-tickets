@@ -173,6 +173,36 @@ must be top-level `*` headings; Stories and other tickets must be at
 level 1 or 2.  Sync and pull stop with an error naming any ticket that
 is deeper, since its description headings could not nest inside it.
 
+### Dependency Graph
+
+`M-x org-tickets-graph` draws the tickets in the current org file as a
+dependency graph.  It writes an SVG beside the file (`tickets.org`
+becomes `tickets.svg`) and opens it in another window; running it again
+refreshes the open image.  The buffer must be saved to a file, and
+[Graphviz](https://graphviz.org) must be installed.
+
+- Every ticket is a rounded box with its key in bold, its heading
+  (without a `Type:` prefix) and its due date when it has one.
+- Parent types (Feature, New Feature, Improvement, Epic) are larger,
+  gold, double-outlined and pinned to the top row, labeled like
+  `FEATURE · PROJ-100`.
+- Tickets without a key show `(new)` and have a dashed border.
+- Arrows run from the blocker to the blocked ticket, so work flows up
+  toward its feature.  They come from `BLOCKS`, `BLOCKED-BY` and each
+  story's parent (its `PARENT` property, else the feature it sits
+  under).  A link to a ticket that is not in the file shows as a small
+  grey dashed box with just its key.
+- Every arrow that is part of a dependency loop, including a ticket
+  that blocks itself, is thick red.  The echo area lists the loops
+  (`A → B → A`) or says there are none.
+
+Two options adjust it:
+
+```elisp
+(setq org-tickets-graph-dot-program "dot") ; Graphviz program to run
+(setq org-tickets-graph-title-width 28)    ; characters of heading shown
+```
+
 ### Description Headings
 
 Headlines under a ticket that have no `JIRA_TYPE` are part of its
