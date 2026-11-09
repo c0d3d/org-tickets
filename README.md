@@ -178,8 +178,10 @@ is deeper, since its description headings could not nest inside it.
 `M-x org-tickets-graph` draws the tickets in the current org file as a
 dependency graph.  It writes an SVG beside the file (`tickets.org`
 becomes `tickets.svg`) and opens it in another window; running it again
-refreshes the open image.  The buffer must be saved to a file, and
-[Graphviz](https://graphviz.org) must be installed.
+refreshes the open image.  The graph always covers the whole file, even
+when the buffer is narrowed.  The buffer must be saved to a file, and
+[Graphviz](https://graphviz.org) must be installed; if it is missing or
+cannot be run, the command says so instead of failing.
 
 - Every ticket is a rounded box with its key in bold, its heading
   (without a `Type:` prefix) and its due date when it has one.
@@ -190,11 +192,12 @@ refreshes the open image.  The buffer must be saved to a file, and
 - Arrows run from the blocker to the blocked ticket, so work flows up
   toward its feature.  They come from `BLOCKS`, `BLOCKED-BY` and each
   story's parent (its `PARENT` property, else the feature it sits
-  under).  A link to a ticket that is not in the file shows as a small
+  under); parent types draw no parent arrow.  A link to a ticket that is not in the file shows as a small
   grey dashed box with just its key.
 - Every arrow that is part of a dependency loop, including a ticket
   that blocks itself, is thick red.  The echo area lists the loops
-  (`A → B → A`) or says there are none.
+  (`A → B → A`, or `loop among: …` for tangled groups) or says there
+  are none.
 
 Two options adjust it:
 

@@ -91,7 +91,9 @@ HEADINGS is as for `org-tickets--graph-ancestor-id'."
                     (org-tickets--ticket-blocks ticket))
             (mapcar (lambda (key) (cons key id))
                     (org-tickets--ticket-blocked-by ticket))
-            (when parent (list (cons id parent))))))
+            (when (and parent (org-tickets--child-type-p
+                               (org-tickets--ticket-type ticket)))
+              (list (cons id parent))))))
 
 (defun org-tickets--graph-external-keys (edges ids)
   "Return the ends of EDGES not in IDS, unique, in order of appearance."
@@ -122,10 +124,12 @@ The result is a plist (:nodes NODES :edges EDGES).  NODES lists one
 plist per ticket in document order, then one per key referenced but
 not in the buffer (:external-p t).  EDGES lists unique (FROM . TO)
 node-id pairs meaning FROM blocks TO, from each ticket's BLOCKS,
-BLOCKED-BY and parent (its PARENT key, else the nearest ancestor
-parent-type ticket heading)."
+BLOCKED-BY and, for child-type tickets, parent (its PARENT key, else
+the nearest ancestor parent-type ticket heading).  Narrowing is ignored."
   (let ((tickets (save-excursion
-                   (org-tickets--doc-tickets (org-tickets--parse-document)))))
+                   (save-restriction
+                     (widen)
+                     (org-tickets--doc-tickets (org-tickets--parse-document))))))
     (unwind-protect
         (org-tickets--graph-build tickets)
       (dolist (ticket tickets)
@@ -331,9 +335,14 @@ arrow runs from the blocker FROM up to the blocked TO."
   :group 'org-tickets)
 
 (defun org-tickets--graph-simple-loop-p (cycle edges)
-  "Non-nil when CYCLE's members, taken in order and closed, are all EDGES."
-  (seq-every-p (lambda (pair) (member pair edges))
-               (seq-mapn #'cons cycle (append (cdr cycle) (list (car cycle))))))
+  "Non-nil when CYCLE, taken in order and closed, is all the EDGES among it."
+  (and (seq-every-p (lambda (pair) (member pair edges))
+                    (seq-mapn #'cons cycle
+                              (append (cdr cycle) (list (car cycle)))))
+       (= (length cycle)
+          (seq-count (lambda (edge)
+                       (and (member (car edge) cycle) (member (cdr edge) cycle)))
+                     edges))))
 
 (defun org-tickets--graph-cycle-text (cycle edges)
   "Return a one-line description of CYCLE, a loop in the graph of EDGES."
@@ -346,20 +355,33 @@ arrow runs from the blocker FROM up to the blocked TO."
   (let ((cycles (org-tickets--graph-cycles edges)))
     (if (null cycles)
         (format "org-tickets: wrote %s — no cycles" file)
-      (format "org-tickets: wrote %s — %d cycle(s): %s" file (length cycles)
+      (format "org-tickets: wrote %s — %d %s: %s" file (length cycles)
+              (if (cdr cycles) "cycles" "cycle")
               (mapconcat (lambda (cycle)
                            (org-tickets--graph-cycle-text cycle edges))
                          cycles "; ")))))
+
+(defun org-tickets--graph-run-dot (out)
+  "Run `org-tickets-graph-dot-program' on the buffer, writing SVG to OUT.
+Return its exit status; a program that cannot be started is a `user-error'."
+  (condition-case err
+      (call-process-region (point-min) (point-max)
+                           org-tickets-graph-dot-program t t nil
+                           "-Tsvg" "-o" out)
+    (file-error
+     (user-error (concat "Could not run `%s': %s; install Graphviz or set "
+                         "`org-tickets-graph-dot-program'")
+                 org-tickets-graph-dot-program
+                 (mapconcat #'identity (cdr (cdr err)) ", ")))))
 
 (defun org-tickets--graph-render (dot out)
   "Render DOT text to the SVG file OUT with `org-tickets-graph-dot-program'."
   (with-temp-buffer
     (insert dot)
-    (unless (zerop (call-process-region (point-min) (point-max)
-                                        org-tickets-graph-dot-program t t nil
-                                        "-Tsvg" "-o" out))
-      (user-error "%s failed: %s" org-tickets-graph-dot-program
-                  (string-trim (buffer-string))))))
+    (let ((status (org-tickets--graph-run-dot out)))
+      (unless (eq status 0)
+        (user-error "%s failed (exit %s): %s" org-tickets-graph-dot-program
+                    status (string-trim (buffer-string)))))))
 
 (defun org-tickets--graph-show (file)
   "Display FILE in another window, refreshing any buffer already visiting it."

@@ -86,6 +86,38 @@
              edges '(("PROJ-101" . "PROJ-102") ("PROJ-102" . "PROJ-103")
                      ("PROJ-101" . "PROJ-100") ("PROJ-103" . "PROJ-100"))))))
 
+(ert-deftest org-tickets-test--graph-model-parent-type-gets-no-parent-edge ()
+  "A Feature carrying a PARENT pointer draws no arrow; a story still does."
+  (let ((edges (plist-get
+                (org-tickets-test--graph-of
+                 (org-tickets-test--keyed-ticket "*" "Feature" "F" "PROJ-100"
+                                                 '("PARENT" . "PROJ-1"))
+                 (org-tickets-test--keyed-ticket "**" "Story" "S" "PROJ-101"))
+                :edges)))
+    (should (equal edges '(("PROJ-101" . "PROJ-100"))))))
+
+(ert-deftest org-tickets-test--graph-model-ignores-narrowing ()
+  "A narrowed buffer still yields the whole file's graph; narrowing is kept."
+  (with-temp-buffer
+    (insert (org-tickets-test--keyed-ticket "*" "Feature" "F1" "PROJ-100")
+            (org-tickets-test--keyed-ticket "**" "Story" "A" "PROJ-101"
+                                            '("BLOCKS" . "PROJ-102"))
+            (org-tickets-test--keyed-ticket "*" "Feature" "F2" "PROJ-200")
+            (org-tickets-test--keyed-ticket "**" "Story" "B" "PROJ-102"
+                                            '("BLOCKS" . "PROJ-103"))
+            (org-tickets-test--keyed-ticket "**" "Story" "C" "PROJ-103"
+                                            '("BLOCKS" . "PROJ-101")))
+    (org-mode)
+    (goto-char (point-min))
+    (org-narrow-to-subtree)
+    (let ((start (point-min)) (end (point-max))
+          (model (org-tickets--graph-model)))
+      (should (= start (point-min)))
+      (should (= end (point-max)))
+      (should (seq-every-p (lambda (n) (not (plist-get n :external-p)))
+                           (plist-get model :nodes)))
+      (should (org-tickets--graph-cycles (plist-get model :edges))))))
+
 (ert-deftest org-tickets-test--graph-model-deduplicates-edges ()
   "A link stated from both ends yields a single edge."
   (let ((edges (plist-get
@@ -387,7 +419,7 @@ every buffer visiting files in it are removed afterwards."
         (should (string-match-p "<svg" (buffer-string)))
         (should (string-match-p "#d62728" (buffer-string))))
       (should (string-match-p
-               (regexp-quote "1 cycle(s): PROJ-102 → PROJ-103 → PROJ-102")
+               (regexp-quote "1 cycle: PROJ-102 → PROJ-103 → PROJ-102")
                (car messages)))
       (should (string-match-p (regexp-quote svg) (car messages))))))
 
@@ -420,6 +452,46 @@ every buffer visiting files in it are removed afterwards."
     (let ((org-tickets-graph-dot-program "false"))
       (should-error (org-tickets-graph) :type 'user-error))))
 
+(defmacro org-tickets-test--with-stub-dot (script &rest body)
+  "Run BODY with `org-tickets-graph-dot-program' a temp executable running SCRIPT."
+  (declare (indent 1))
+  `(let ((stub (make-temp-file "stub-dot" nil ".sh"))
+         (org-tickets-graph-dot-program nil))
+     (unwind-protect
+         (progn
+           (with-temp-file stub (insert "#!/bin/sh\n" ,script "\n"))
+           (set-file-modes stub #o755)
+           (setq org-tickets-graph-dot-program stub)
+           ,@body)
+       (delete-file stub))))
+
+(ert-deftest org-tickets-test--graph-command-dot-failure-includes-stderr ()
+  "A dot that writes to stderr and exits 1 yields its text in the error."
+  (unless (executable-find "sh") (ert-skip "no sh"))
+  (org-tickets-test--with-graph-file org-tickets-test--graph-loop-text
+    (org-tickets-test--with-stub-dot "echo 'bad graph syntax' >&2; exit 1"
+      (let ((err (should-error (org-tickets-graph) :type 'user-error)))
+        (should (string-match-p "bad graph syntax" (cadr err)))))))
+
+(ert-deftest org-tickets-test--graph-command-silent-failure-includes-exit-code ()
+  "A dot that fails without output still reports its exit code."
+  (unless (executable-find "sh") (ert-skip "no sh"))
+  (org-tickets-test--with-graph-file org-tickets-test--graph-loop-text
+    (org-tickets-test--with-stub-dot "exit 3"
+      (let ((err (should-error (org-tickets-graph) :type 'user-error)))
+        (should (string-match-p "exit.*3" (cadr err)))))))
+
+(ert-deftest org-tickets-test--graph-command-unrunnable-dot-is-user-error ()
+  "A dot program that exists but cannot be executed gives a helpful error."
+  (org-tickets-test--with-graph-file org-tickets-test--graph-loop-text
+    (let ((prog (make-temp-file "not-exec")))
+      (unwind-protect
+          (let* ((org-tickets-graph-dot-program prog)
+                 (err (should-error (org-tickets-graph) :type 'user-error)))
+            (should (string-match-p "org-tickets-graph-dot-program" (cadr err)))
+            (should (string-match-p (regexp-quote prog) (cadr err))))
+        (delete-file prog)))))
+
 (ert-deftest org-tickets-test--graph-cycle-text-formats ()
   "Simple loops repeat their first id; other groups list members; self-loops."
   (should (equal (org-tickets--graph-cycle-text
@@ -430,6 +502,10 @@ every buffer visiting files in it are removed afterwards."
   (should (equal (org-tickets--graph-cycle-text
                   '("A" "B" "C")
                   '(("A" . "B") ("B" . "A") ("A" . "C") ("C" . "A")))
+                 "loop among: A, B, C"))
+  (should (equal (org-tickets--graph-cycle-text
+                  '("A" "B" "C")
+                  '(("A" . "B") ("B" . "C") ("C" . "A") ("C" . "B")))
                  "loop among: A, B, C")))
 
 (provide 'org-tickets-test-graph)
