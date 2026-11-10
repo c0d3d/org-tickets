@@ -47,7 +47,7 @@ Test files mirror source modules:
 | `org-tickets-inherit.el` | `org-tickets-test-inheritance.el` (DUE_DATE/FIX_VERSION inheritance), `org-tickets-test-sync-due-date.el` (due date in payloads and external parents) |
 | `org-tickets-sync-phases.el` | `org-tickets-test-sync-flow.el` (whole pipeline, phase ordering, buffer protection, key write-back, BLOCKED-BY write-back), `org-tickets-test-sync-flow-phase2.el` (attachment thunks), `org-tickets-test-sync-errors.el` (failed requests, killed buffer, errors in late callbacks still unlocking the buffer, phase-3 write-back helpers) |
 | `org-tickets-sync.el` | `org-tickets-test-sync.el` (org property helpers, payloads), `org-tickets-test-sync-sprint.el` (sprint and fix version in create/update payloads), `org-tickets-test-sync-commands.el` (story creation, block links, fix version, sizing label, issue-type loading) |
-| `org-tickets-cmd.el` | `org-tickets-test-cmd.el`, `org-tickets-test-cmd-attach.el` (attach add/list/remove commands), `org-tickets-test-cmd-ticket-at-point.el` (commands run from inside a ticket's description headings) |
+| `org-tickets-cmd.el` | `org-tickets-test-cmd.el`, `org-tickets-test-cmd-attach.el` (attach add/list/remove commands), `org-tickets-test-cmd-ticket-at-point.el` (commands run from inside a ticket's description headings), `org-tickets-test-cmd-navigation.el` (next/previous ticket commands and `s-<up>`/`s-<down>` bindings) |
 
 Test files live in `test/` and are loaded by `test/org-tickets-test.el` (the test runner entry point), which holds only `require`s; each test file `provide`s its own feature and passes when loaded on its own. Put a test in the file for the module it exercises, not the one that happens to share its fixtures.
 

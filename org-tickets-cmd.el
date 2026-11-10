@@ -266,6 +266,38 @@ and you need to sync those changes into your local org buffer."
       (user-error "No ticket key given"))
     (org-tickets--insert-ticket-hyperlink ticket-key)))
 
+;;;; Navigation Commands
+
+(defun org-tickets--goto-ticket-heading (step)
+  "Move to the next ticket heading in direction STEP (1 or -1).
+Description headings are skipped.  Leave point alone and signal a
+`user-error' when there is no further ticket heading."
+  (let ((origin (point))
+        (move (if (> step 0) #'outline-next-heading #'outline-previous-heading)))
+    (when (> step 0) (end-of-line))
+    (when (< step 0) (beginning-of-line))
+    (while (and (funcall move) (not (org-tickets--ticket-heading-p))))
+    (unless (and (org-at-heading-p) (org-tickets--ticket-heading-p)
+                 (/= (point) origin))
+      (goto-char origin)
+      (user-error "No %s ticket heading" (if (> step 0) "next" "previous")))))
+
+;;;###autoload
+(defun org-tickets-next-ticket ()
+  "Move to the next ticket heading."
+  (interactive)
+  (org-tickets--goto-ticket-heading 1))
+
+;;;###autoload
+(defun org-tickets-previous-ticket ()
+  "Move to the preceding ticket heading."
+  (interactive)
+  (org-tickets--goto-ticket-heading -1))
+
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "s-<up>") #'org-tickets-previous-ticket)
+  (define-key org-mode-map (kbd "s-<down>") #'org-tickets-next-ticket))
+
 (provide 'org-tickets-cmd)
 
 ;;; org-tickets-cmd.el ends here

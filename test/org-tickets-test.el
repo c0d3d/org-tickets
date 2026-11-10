@@ -36,6 +36,7 @@
 (require 'org-tickets-test-headings-push)
 (require 'org-tickets-test-headings-pull)
 (require 'org-tickets-test-cmd-ticket-at-point)
+(require 'org-tickets-test-cmd-navigation)
 (require 'org-tickets-test-list-continuation)
 (require 'org-tickets-test-ordered-start)
 (require 'org-tickets-test-fields)
