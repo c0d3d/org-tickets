@@ -377,6 +377,72 @@ Improvement description.
         (should (member "label2" (org-tickets--ticket-labels ticket)))
         (should (= 5 (org-tickets--ticket-story-points ticket)))))))
 
+;;;; Description boundaries
+
+(ert-deftest org-tickets-test--description-nil-for-drawer-without-body ()
+  "A ticket with a properties drawer and no body has no description."
+  (should-not (org-tickets-test--description-of
+               (org-tickets-test--ticket-text "*" "Story" "Bare" "" "P-1")
+               "Bare")))
+
+(ert-deftest org-tickets-test--description-without-drawer ()
+  "A heading without a properties drawer yields its whole body."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* No drawer\nJust the body.\n** Sub\nMore.\n")
+    (goto-char (point-min))
+    (should (equal (org-tickets--get-ticket-description)
+                   "Just the body.\n** Sub\nMore."))))
+
+;;;; Phase batches
+
+(ert-deftest org-tickets-test--non-feature-batch-holds-other-types ()
+  "A ticket of a type that is neither a parent nor a Story (e.g. Bug)
+lands in the non-feature batch, so it still reaches Jira."
+  (with-temp-buffer
+    (org-mode)
+    (insert (org-tickets-test--ticket-text "*" "Feature" "F" "")
+            (org-tickets-test--ticket-text "**" "Bug" "B" "")
+            (org-tickets-test--ticket-text "**" "Story" "S" ""))
+    (should (equal (mapcar #'org-tickets--ticket-summary
+                           (org-tickets--doc-non-feature-tickets
+                            (org-tickets--parse-document)))
+                   '("B" "S")))))
+
+;;;; Issue types keyword
+
+(defun org-tickets-test--issue-types-from (value)
+  "Return the issue types loaded from a #+JIRA_ISSUE_TYPES keyword of VALUE."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+JIRA_ISSUE_TYPES: " value "\n* H\n")
+    (org-tickets--load-issue-types)))
+
+(ert-deftest org-tickets-test--issue-types-drop-malformed-pairs ()
+  "Pairs without a NAME=ID shape are dropped, and the rest still save."
+  (let ((types (org-tickets-test--issue-types-from "Story=1,garbage, =3,Bug=2")))
+    (should (equal types '(("Story" . "1") ("Bug" . "2"))))
+    (should (equal (org-tickets--format-issue-types types)
+                   "#+JIRA_ISSUE_TYPES: Story=1,Bug=2"))))
+
+(ert-deftest org-tickets-test--issue-type-pair-splits-at-last-equals ()
+  "In A=B=C the id is after the last `=': ids are numeric, names are not."
+  (should (equal (org-tickets-test--issue-types-from "A=B=C")
+                 '(("A=B" . "C")))))
+
+(ert-deftest org-tickets-test--parse-document-error-releases-markers ()
+  "A ticket that fails to parse frees the markers of the tickets before it."
+  (with-temp-buffer
+    (insert "* F\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:END:\n"
+            "** S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n"
+            "*** Too deep\n:PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n")
+    (org-mode)
+    (let ((markers nil))
+      (org-tickets-test--recording-markers markers
+        (should-error (org-tickets--parse-document) :type 'user-error))
+      (should (= (length markers) 2))
+      (should-not (seq-some #'marker-buffer markers)))))
+
 (provide 'org-tickets-test-parse)
 
 ;;; org-tickets-test-parse.el ends here

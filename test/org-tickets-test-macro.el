@@ -31,6 +31,10 @@
 (require 'org-element)
 
 (require 'org-tickets)
+(require 'org-tickets-test-fixtures)
+
+(defvar org-tickets-test--macro-ran nil
+  "Set when a test's (eval ...) macro body runs.")
 
 (ert-deftest org-tickets-test--undefined-macro-not-kept-as-literal-in-adf ()
   "An undefined macro does not appear as literal {{{...}}} in ADF output,
@@ -42,6 +46,44 @@ and leaves no empty text node behind."
       (should (string-match-p "after" json-str))
       ;; Jira rejects empty text nodes.
       (should-not (string-match-p "\"text\":\"\"" json-str)))))
+
+(defun org-tickets-test--macro-text (org-text)
+  "Return all ADF text pushed for ORG-TEXT concatenated into one string."
+  (apply #'concat (org-tickets-test--adf-texts
+                   (org-tickets-test--adf-blocks org-text))))
+
+(ert-deftest org-tickets-test--global-macro-expands ()
+  "A macro defined in the global `org-macro-templates' expands, with
+its arguments substituted."
+  (let ((org-macro-templates '(("greet" . "hello $1"))))
+    (should (equal (org-tickets-test--macro-text "say {{{greet(world)}}} now")
+                   "say hello world now"))))
+
+(ert-deftest org-tickets-test--description-macro-expands ()
+  "A #+MACRO defined in the description itself expands, and its
+definition line pushes nothing."
+  (should (equal (org-tickets-test--macro-text
+                  "#+MACRO: greet hello $1\nsay {{{greet(world)}}} now")
+                 "say hello world now")))
+
+(ert-deftest org-tickets-test--description-macro-overrides-global ()
+  "A description's own #+MACRO wins over a global one of the same name."
+  (let ((org-macro-templates '(("greet" . "global"))))
+    (should (equal (org-tickets-test--macro-text
+                    "#+MACRO: greet local\n{{{greet}}}")
+                   "local"))))
+
+(ert-deftest org-tickets-test--description-eval-macro-never-runs ()
+  "An (eval ...) #+MACRO in the description is never evaluated: the
+text may have come from Jira, and pushing must not run its code."
+  (let ((org-tickets-test--macro-ran nil))
+    (should-not (string-match-p
+                 "ran"
+                 (org-tickets-test--macro-text
+                  (concat "#+MACRO: boom (eval (progn (setq "
+                          "org-tickets-test--macro-ran t) \"ran\"))\n"
+                          "x {{{boom}}} y"))))
+    (should-not org-tickets-test--macro-ran)))
 
 (provide 'org-tickets-test-macro)
 

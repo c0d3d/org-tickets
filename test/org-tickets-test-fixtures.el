@@ -58,6 +58,18 @@ so a stub expression never sees a partially-stubbed world."
                             (fmakunbound ',name)))
                        names old-vars))))))
 
+(defmacro org-tickets-test--recording-markers (var &rest body)
+  "Run BODY with every marker made by `copy-marker' pushed onto VAR."
+  (declare (indent 1))
+  (let ((orig (make-symbol "orig")))
+    `(let ((,orig (symbol-function 'copy-marker)))
+       (org-tickets-test--with-stubs
+           ((copy-marker (lambda (&rest args)
+                           (let ((marker (apply ,orig args)))
+                             (push marker ,var)
+                             marker))))
+         ,@body))))
+
 (defun org-tickets-test--json (json-string)
   "Parse JSON-STRING exactly as `org-tickets--api-request' parses responses.
 Returns alists with symbol keys, lists for arrays, and `:json-false'
@@ -257,6 +269,10 @@ Relies on the request handler calling back synchronously."
                                 (lambda (r _err) (setq response r)))
     response))
 
+(defconst org-tickets-test--stub-adf-description
+  '((type . "doc") (version . 1) (content . []))
+  "The ADF description `org-tickets-test--with-sync-mocks' converts every body to.")
+
 (defun org-tickets-test--attachments-done (_key _attachments callback)
   "Stand in for an attachment batch function: report CALLBACK done."
   (funcall callback nil nil))
@@ -273,7 +289,11 @@ REQUEST-HANDLER is the form answering `org-tickets--async-request'."
       (org-tickets--async-download-attachments #'org-tickets-test--attachments-done)
       (org-tickets--async-sync-ticket-links
        (lambda (_ticket callback) (funcall callback)))
-      (org-tickets--build-adf-description #'ignore)
+      (org-tickets--build-adf-description
+       (lambda (&rest _) org-tickets-test--stub-adf-description))
+      (url-retrieve-synchronously
+       (lambda (url &rest _)
+         (error "Test reached the network: %s" url)))
       (force-mode-line-update #'ignore)
       (run-at-time #'ignore))))
 
@@ -285,11 +305,12 @@ REQUEST-HANDLER replaces `org-tickets--async-request': a function
 
 Stubbed out: issue-type and sprint-cache setup, both attachment batch
 functions and `org-tickets--async-sync-ticket-links' (all report done
-at once), and `org-tickets--build-adf-description' (returns nil, so no
-description is pushed).  The synchronous `org-tickets--get-ticket' is
+at once), and `org-tickets--build-adf-description' (returns the fixed
+`org-tickets-test--stub-adf-description', so no conversion runs).  The synchronous `org-tickets--get-ticket' is
 routed through REQUEST-HANDLER as a GET of /rest/api/3/issue/KEY, so
 parent lookups (due-date and fix-version inheritance) see the same fake
-Jira and appear in its log.
+Jira and appear in its log.  Any other synchronous request (e.g. sprint
+name resolution) signals instead of reaching the real network.
 
 BODY may start with `:real (FN ...)' to leave the named functions
 unstubbed, e.g. `:real (org-tickets--async-sync-ticket-links)' to send

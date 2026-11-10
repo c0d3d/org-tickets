@@ -247,14 +247,43 @@ Network functions are stubbed.  Fail when BODY moves point."
         (should (= pt (point)))))))
 
 (ert-deftest org-tickets-test--refresh-issue-types-requires-org-buffer ()
-  "Refreshing issue types outside an org buffer is an error."
+  "Refreshing issue types outside an org buffer is an error, and fetches nothing."
   (with-temp-buffer
     (fundamental-mode)
-    (org-tickets-test--with-stubs
-        ((org-tickets--resolve-config (lambda (&rest _) nil))
-         (org-tickets--fetch-issue-types (lambda (&rest _) nil)))
-      (should-error (org-tickets-refresh-issue-types) :type 'user-error))
+    (let ((fetched nil))
+      (org-tickets-test--with-stubs
+          ((org-tickets--resolve-config (lambda (&rest _) nil))
+           (org-tickets--fetch-issue-types
+            (lambda (&rest _) (setq fetched t) '(("Story" . "1")))))
+        (should-error (org-tickets-refresh-issue-types) :type 'user-error))
+      (should-not fetched))
     (should (equal "" (buffer-string)))))
+
+(ert-deftest org-tickets-test--refresh-issue-types-saves-fetched-types ()
+  "Refreshing replaces the saved issue types with the ones Jira reports."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+JIRA_ISSUE_TYPES: Story=9\n* H\n")
+    (let ((org-tickets--issue-type-ids '(("Story" . "9")))
+          (messages nil))
+      (org-tickets-test--with-stubs
+          ((org-tickets--resolve-config #'ignore)
+           (org-tickets--fetch-issue-types
+            (lambda () '(("Story" . "1") ("Bug" . "2"))))
+           (message (lambda (fmt &rest args)
+                      (push (apply #'format fmt args) messages))))
+        (org-tickets-refresh-issue-types))
+      (should (equal org-tickets--issue-type-ids '(("Story" . "1") ("Bug" . "2"))))
+      (should (equal (buffer-string) "#+JIRA_ISSUE_TYPES: Story=1,Bug=2\n* H\n"))
+      (should (string-match-p "Issue types refreshed" (car messages))))))
+
+(ert-deftest org-tickets-test--sync-to-jira-command-runs-sync ()
+  "The public sync command runs the sync pipeline once."
+  (let ((calls 0))
+    (org-tickets-test--with-stubs
+        ((org-tickets--sync-to-jira (lambda () (setq calls (1+ calls)))))
+      (call-interactively #'org-tickets-sync-to-jira))
+    (should (= calls 1))))
 
 ;;;; Attachment removal
 
@@ -300,6 +329,108 @@ named file is in neither it nor Jira."
     (goto-char (point-min))
     (let ((err (should-error (org-tickets-attach-remove "test.pdf"))))
       (should (string-match-p "JIRA_KEY" (error-message-string err))))))
+
+;;;; Templates
+
+(defun org-tickets-test--feature-props (fix-version due-date)
+  "Insert a feature with FIX-VERSION and DUE-DATE; return them as read back."
+  (with-temp-buffer
+    (org-mode)
+    (org-tickets-insert-feature-template "New" fix-version due-date)
+    (goto-char (point-min))
+    (list (org-entry-get (point) "FIX_VERSION")
+          (org-entry-get (point) "DUE_DATE"))))
+
+(ert-deftest org-tickets-test--feature-template-writes-version-and-due-date ()
+  "Given values, FIX_VERSION and DUE_DATE are written; nil or \"\" omit them."
+  (should (equal (org-tickets-test--feature-props "Aug2026" "2026-12-01")
+                 '("Aug2026" "2026-12-01")))
+  (should (equal (org-tickets-test--feature-props nil nil) '(nil nil)))
+  (should (equal (org-tickets-test--feature-props "" "") '(nil nil))))
+
+(ert-deftest org-tickets-test--template-leaves-point-after-drawer ()
+  "Point ends on the line after the new entry's :END:, inside the entry."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Other\n")
+    (org-tickets-insert-story-template "New" "P-1")
+    (should (bolp))
+    (should (equal (org-get-heading t t t t) "New"))
+    (forward-line -1)
+    (should (looking-at-p ":END:$"))))
+
+(defun org-tickets-test--template-mid-line (text offset)
+  "Insert a Story template OFFSET chars into an org buffer holding TEXT.
+Return the buffer text afterwards."
+  (with-temp-buffer
+    (org-mode)
+    (insert text)
+    (goto-char (+ (point-min) offset))
+    (org-tickets--insert-ticket-template "*" "Story" "New" nil)
+    (buffer-string)))
+
+(ert-deftest org-tickets-test--template-mid-line-starts-new-line ()
+  "From mid-line, the heading goes on its own line after the current one."
+  (let ((expected (concat "* a\nfoo bar\n* New\n"
+                          ":PROPERTIES:\n:JIRA_TYPE: Story\n:END:\n")))
+    (should (equal (org-tickets-test--template-mid-line "* a\nfoo bar" 7)
+                   expected))
+    (should (equal (org-tickets-test--template-mid-line "* a\nfoo bar" 11)
+                   expected))
+    (should (equal (org-tickets-test--template-mid-line "* a\nfoo bar\n" 7)
+                   expected))))
+
+;;;; Links and URLs
+
+(defun org-tickets-test--insert-link-reading (input)
+  "Run `org-tickets-insert-ticket-link' reading INPUT; return the buffer text."
+  (with-temp-buffer
+    (org-mode)
+    (org-tickets-test--with-stubs ((read-string (lambda (&rest _) input)))
+      (org-tickets-insert-ticket-link))
+    (buffer-string)))
+
+(ert-deftest org-tickets-test--insert-ticket-link-rejects-blank-key ()
+  "A blank key is a user-error and inserts nothing."
+  (let ((org-tickets-base-url "https://x.test"))
+    (dolist (input '("" "  "))
+      (should-error (org-tickets-test--insert-link-reading input)
+                    :type 'user-error))))
+
+(ert-deftest org-tickets-test--insert-ticket-link-inserts-browse-link ()
+  "A key is inserted as an org link to its browse page, trimmed."
+  (let ((org-tickets-base-url "https://x.test"))
+    (should (equal (org-tickets-test--insert-link-reading " PROJ-1 ")
+                   "[[https://x.test/browse/PROJ-1][PROJ-1]]"))))
+
+(defun org-tickets-test--copy-link-with-base (base-url)
+  "Run `org-tickets-copy-link' on PROJ-1 with BASE-URL; return the kill ring."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* T\n:PROPERTIES:\n:JIRA_KEY: PROJ-1\n:END:\n")
+    (goto-char (point-min))
+    (let ((org-tickets-base-url base-url)
+          (kill-ring nil))
+      (org-tickets-test--with-stubs ((message #'ignore))
+        (ignore-error user-error (org-tickets-copy-link)))
+      kill-ring)))
+
+(ert-deftest org-tickets-test--copy-link-unset-base-url ()
+  "Without a base URL, copying is a user-error and nothing is killed."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* T\n:PROPERTIES:\n:JIRA_KEY: PROJ-1\n:END:\n")
+    (goto-char (point-min))
+    (let ((org-tickets-base-url nil) (kill-ring nil))
+      (let ((err (should-error (org-tickets-copy-link) :type 'user-error)))
+        (should (string-match-p "org-tickets-base-url" (cadr err))))
+      (should-not kill-ring)))
+  (should-not (org-tickets-test--copy-link-with-base "")))
+
+(ert-deftest org-tickets-test--copy-link-trailing-slash-base-url ()
+  "A base URL ending in a slash still gives a single-slash browse URL."
+  (should (equal (org-tickets-test--copy-link-with-base "https://x.test/")
+                 '("https://x.test/browse/PROJ-1"))))
 
 (provide 'org-tickets-test-cmd)
 ;;; org-tickets-test-cmd.el ends here

@@ -100,6 +100,8 @@ Jira.  Signals an error when Jira cannot return the feature either."
               :due-date (org-tickets--ticket-due-date feature)
               :labels (org-tickets--ticket-labels feature))
       (let ((issue (org-tickets--get-ticket feature-key)))
+        (unless issue
+          (error "org-tickets: Could not fetch parent %s from Jira" feature-key))
         (list :fix-version (org-tickets--issue-fix-version issue)
               :due-date (org-tickets--issue-due-date issue)
               :labels (org-tickets--response-field issue "labels"))))))
@@ -266,11 +268,8 @@ Phase 3: apply all results to the org buffer synchronously."
       (setq org-tickets--sync-in-progress t)
       (org-tickets--sync-save-point)
       (org-tickets--progress-init ticket-count)
-      (condition-case err
-          (org-tickets--sync-phase-1 doc all-features-exist-p org-buffer)
-        (error
-         (org-tickets--sync-cleanup)
-         (message "org-tickets: Sync failed: %S" err))))))
+      (org-tickets--with-sync-abort doc org-buffer
+        (org-tickets--sync-phase-1 doc all-features-exist-p org-buffer)))))
 
 (provide 'org-tickets-sync)
 

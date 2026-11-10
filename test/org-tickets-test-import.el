@@ -413,16 +413,25 @@ the imported heading, plus (:heading . TITLE)."
 ;;;; Parse-failure fallback
 
 (ert-deftest org-tickets-test--adf-parse-failure-yields-nil-description ()
-  "A description that cannot be parsed becomes nil, never a raw %S dump."
-  (let ((response (org-tickets-test--json
+  "A description the parser signals on becomes nil, never a raw %S dump,
+and an `org-tickets' warning names the ticket."
+  (let ((warnings nil)
+        (response (org-tickets-test--json
                    "{\"id\":\"1\",\"key\":\"P-1\",\"fields\":{
                       \"issuetype\":{\"name\":\"Story\"},
                       \"summary\":\"S\",
-                      \"description\":{\"type\":\"doc\",\"version\":1},
+                      \"description\":{\"type\":\"doc\",\"version\":1,\"content\":[
+                        {\"type\":\"heading\",\"attrs\":{\"level\":\"two\"},
+                         \"content\":[{\"type\":\"text\",\"text\":\"H\"}]}]},
                       \"labels\":[]}}")))
-    ;; content missing -> old code error'd then dumped the alist as text.
-    (let ((ticket (org-tickets--parse-jira-issue response)))
-      (should (null (org-tickets--ticket-description ticket))))))
+    (org-tickets-test--with-stubs
+        ((display-warning (lambda (type message &rest _)
+                            (push (cons type message) warnings))))
+      (should (null (org-tickets--ticket-description
+                     (org-tickets--parse-jira-issue response)))))
+    (should (= (length warnings) 1))
+    (should (eq (caar warnings) 'org-tickets))
+    (should (string-match-p "P-1" (cdar warnings)))))
 
 ;;;; Import hardening
 

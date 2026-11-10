@@ -159,6 +159,81 @@ tickets get their links on the FIRST sync (they were silently skipped)."
         (org-tickets--async-sync-ticket-links story #'ignore))
       (should (seq-some (lambda (m) (string-match-p "403 Forbidden" m)) logged)))))
 
+;;;; Duplicate and degenerate links
+
+(defun org-tickets-test--links-of-first-ticket (&rest tickets)
+  "Sync only the first of TICKETS' links; return (CALLED LINKS).
+TICKETS are argument lists for `org-tickets-test--insert-ticket'.  CALLED
+is non-nil once the completion callback ran; LINKS are the
+\(BLOCKER BLOCKED TYPE) links POSTed."
+  (let ((requests nil)
+        (called nil))
+    (org-tickets-test--with-fake-config
+      (org-tickets-test--with-stubs
+          ((org-tickets--async-request
+            (org-tickets-test--fake-jira-handler :log requests)))
+        (with-temp-buffer
+          (org-mode)
+          (dolist (ticket tickets)
+            (apply #'org-tickets-test--insert-ticket ticket))
+          (org-tickets--async-sync-ticket-links
+           (car (org-tickets--doc-tickets (org-tickets--parse-document)))
+           (lambda () (setq called t))))))
+    (list called (org-tickets-test--logged-links requests))))
+
+(ert-deftest org-tickets-test--parent-also-in-blocks-links-once ()
+  "A Story whose PARENT is also listed in BLOCKS POSTs that link once."
+  (should (equal (org-tickets-test--links-of-first-ticket
+                  '(1 "S" "JIRA_TYPE" "Story" "JIRA_KEY" "P-2"
+                      "PARENT" "P-1" "BLOCKS" "P-1,P-1"))
+                 '(t (("P-2" "P-1" "Blocks"))))))
+
+(ert-deftest org-tickets-test--repeated-blocked-by-links-once ()
+  "A key repeated in BLOCKED-BY POSTs its link once."
+  (should (equal (org-tickets-test--links-of-first-ticket
+                  '(1 "S" "JIRA_TYPE" "Story" "JIRA_KEY" "P-2"
+                      "BLOCKED-BY" "P-3,P-3"))
+                 '(t (("P-3" "P-2" "Blocks"))))))
+
+(ert-deftest org-tickets-test--same-key-in-blocks-and-blocked-by ()
+  "A key in both BLOCKS and BLOCKED-BY names two different links (a cycle);
+each direction is POSTed once."
+  (should (equal (org-tickets-test--links-of-first-ticket
+                  '(1 "S" "JIRA_TYPE" "Story" "JIRA_KEY" "P-2"
+                      "BLOCKS" "P-3" "BLOCKED-BY" "P-3"))
+                 '(t (("P-2" "P-3" "Blocks") ("P-3" "P-2" "Blocks"))))))
+
+(ert-deftest org-tickets-test--link-named-by-both-tickets-posted-once ()
+  "P-1 BLOCKS P-2 and P-2 BLOCKED-BY P-1 describe one link; a sync POSTs it once."
+  (should (equal (org-tickets-test--synced-links
+                  '(1 "A" "JIRA_TYPE" "Feature" "JIRA_KEY" "P-1" "BLOCKS" "P-2")
+                  '(1 "B" "JIRA_TYPE" "Feature" "JIRA_KEY" "P-2" "BLOCKED-BY" "P-1"))
+                 '(("P-1" "P-2" "Blocks")))))
+
+(ert-deftest org-tickets-test--ticket-without-key-sends-no-links ()
+  "A ticket with no key anywhere completes at once without any request."
+  (should (equal (org-tickets-test--links-of-first-ticket
+                  '(1 "S" "JIRA_TYPE" "Story" "PARENT" "P-1" "BLOCKS" "P-3"))
+                 '(t nil))))
+
+(ert-deftest org-tickets-test--feature-parent-is-not-linked ()
+  "A Feature's PARENT property produces no parent link."
+  (should (equal (org-tickets-test--links-of-first-ticket
+                  '(1 "F" "JIRA_TYPE" "Feature" "JIRA_KEY" "P-2" "PARENT" "P-1"))
+                 '(t nil))))
+
+(ert-deftest org-tickets-test--at-ticket-marker-nil-without-live-marker ()
+  "BODY is skipped when the ticket has no marker or its buffer is dead."
+  (should-not (org-tickets--at-ticket-marker (org-tickets--ticket-create) t))
+  (let* ((buffer (generate-new-buffer " *marker*"))
+         (ticket (org-tickets--ticket-create
+                  :marker (with-current-buffer buffer
+                            (insert "* H\n")
+                            (copy-marker (point-min))))))
+    (should (org-tickets--at-ticket-marker ticket t))
+    (kill-buffer buffer)
+    (should-not (org-tickets--at-ticket-marker ticket t))))
+
 (provide 'org-tickets-test-sync-links)
 
 ;;; org-tickets-test-sync-links.el ends here

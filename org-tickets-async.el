@@ -222,9 +222,14 @@ instead of the body."
   "Dispatch PARSED response plist in STATE-BUFFER.
 Rate-limit bookkeeping and CALLBACK both run in the buffer that made
 the request, never in url.el's response buffer.  THUNK re-fires the
-request on 429."
-  (let ((buf (if (buffer-live-p state-buffer) state-buffer (current-buffer))))
-    (with-current-buffer buf
+request on 429.  When STATE-BUFFER has been killed the response is
+dropped: running CALLBACK in whatever buffer happens to be current
+would corrupt that buffer's rate-limit state and contents."
+  (if (not (buffer-live-p state-buffer))
+      (when org-tickets-debug
+        (message "org-tickets: dropping response for a killed buffer: %s"
+                 (plist-get parsed :status)))
+    (with-current-buffer state-buffer
       (org-tickets--async-decrement-in-flight)
       ;; `unwind-protect' guarantees the queue is drained on every branch.
       (unwind-protect
@@ -233,7 +238,7 @@ request on 429."
              ((string-empty-p status)
               (org-tickets--async-safe-callback
                callback nil "Could not find end of HTTP headers"))
-             ((string-match-p "HTTP/.* 429" status)
+             ((eql (org-tickets--http-status-code status) 429)
               (org-tickets--async-handle-429 status thunk))
              ((org-tickets--http-success-p status)
               (org-tickets--async-dispatch-success parsed callback))
@@ -298,7 +303,8 @@ concurrency cap."
   "Fire all THUNKS concurrently and call FINAL-CALLBACK when all complete.
 THUNKS is a list of one-arg functions.  Each thunk accepts a single DONE
 argument: a callback of the form `(lambda (response err) ...)'.  The thunk
-must call DONE exactly once when its async operation completes.
+must call DONE once when its async operation completes; any later call
+of the same DONE is ignored.
 
 Example thunk:
   (lambda (done)
@@ -315,14 +321,24 @@ limit."
             (counter (list 0))   ; mutable counter via cons cell
             (idx 0))
         (dolist (thunk thunks)
-          (let ((i idx))
-            (setq idx (1+ idx))
-            (funcall thunk
-                     (lambda (response err)
-                       (aset results i (cons response err))
-                       (setcar counter (1+ (car counter)))
-                       (when (= (car counter) total)
-                         (funcall final-callback (append results nil)))))))))))
+          (funcall thunk (org-tickets--async-batch-done
+                          results idx counter final-callback))
+          (setq idx (1+ idx)))))))
+
+(defun org-tickets--async-batch-done (results index counter final-callback)
+  "Return the DONE callback for thunk INDEX of an `org-tickets--async-batch'.
+It stores (RESPONSE . ERR) at INDEX of the RESULTS vector and bumps
+COUNTER, a one-element list; the last thunk to finish calls
+FINAL-CALLBACK with RESULTS as a list.  Calls after the first are
+ignored, so a thunk calling DONE twice cannot finish the batch early."
+  (let ((called nil))
+    (lambda (response err)
+      (unless called
+        (setq called t)
+        (aset results index (cons response err))
+        (setcar counter (1+ (car counter)))
+        (when (= (car counter) (length results))
+          (funcall final-callback (append results nil)))))))
 
 (provide 'org-tickets-async)
 

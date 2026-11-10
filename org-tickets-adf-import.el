@@ -63,9 +63,10 @@ falls back to the alt attribute (which Jira sets to the filename)."
 
 (defun org-tickets--adf-apply-marks (text marks)
   "Wrap TEXT in org markup for each ADF mark in MARKS.
-Supported: code, strong, em/emphasis, underline, strike, subsup, link."
+Supported: code, strong, em/emphasis, underline, strike, subsup, link.
+Empty TEXT stays empty: markers around nothing would be literal text."
   (let ((result text))
-    (dolist (mark marks result)
+    (dolist (mark (and (> (length text) 0) marks) result)
       (pcase (org-tickets--alist-get "type" mark)
         ("code" (setq result (format "~%s~" result)))
         ("strong" (setq result (format "*%s*" result)))
@@ -98,7 +99,15 @@ Supported: code, strong, em/emphasis, underline, strike, subsup, link."
     ("inlineCard"
      (let ((url (org-tickets--alist-get "url" (org-tickets--adf-attrs node))))
        (if url (format "[[%s]]" url) "")))
-    (_ (org-tickets--adf-inlines-to-org (org-tickets--adf-node-content node)))))
+    (_ (org-tickets--adf-unknown-inline-to-org node))))
+
+(defun org-tickets--adf-unknown-inline-to-org (node)
+  "Render inline NODE of an unknown type as its content, else its text attr."
+  (let ((nested (org-tickets--adf-inlines-to-org
+                 (org-tickets--adf-node-content node))))
+    (if (> (length nested) 0)
+        nested
+      (or (org-tickets--alist-get "text" (org-tickets--adf-attrs node)) ""))))
 
 (defun org-tickets--adf-inlines-to-org (nodes)
   "Render inline NODES to one org string."
@@ -191,7 +200,7 @@ keeping pull+push symmetric with the exporter."
          (ncols (and rows (length (org-tickets--adf-node-content (car rows)))))
          (header-p (and rows (org-tickets--adf-table-row-is-header-p (car rows))))
          (lines (mapcar #'org-tickets--adf-table-row-to-org rows)))
-    (when (and header-p (cdr lines))
+    (when header-p
       ;; Splice a rule row (|-...) after the header so org sees an hline.
       (setq lines (cons (car lines)
                         (cons (org-tickets--org-table-rule-row ncols)
@@ -280,7 +289,24 @@ sees nested content as belonging to the item."
     ((or "mediaSingle" "mediaGroup") (org-tickets--adf-media-single-to-org node))
     ((or "panel" "expand") (org-tickets--adf-blocks-to-org
                             (org-tickets--adf-node-content node)))
-    (_ (org-tickets--adf-inlines-to-org (org-tickets--adf-node-content node)))))
+    (_ (org-tickets--adf-unknown-block-to-org node))))
+
+(defconst org-tickets--adf-inline-types
+  '("text" "hardBreak" "mediaInline" "emoji" "mention" "inlineCard")
+  "ADF node types rendered by the inline layer.")
+
+(defun org-tickets--adf-unknown-block-to-org (node)
+  "Render block NODE of an unknown type from its content.
+Content made only of inline nodes is rendered as one line of text;
+anything else (e.g. layoutSection's columns of paragraphs) as blocks, so
+each child keeps its own line."
+  (let ((content (org-tickets--adf-node-content node)))
+    (if (seq-every-p (lambda (child)
+                       (member (org-tickets--adf-type child)
+                               org-tickets--adf-inline-types))
+                     content)
+        (org-tickets--adf-inlines-to-org content)
+      (org-tickets--adf-blocks-to-org content))))
 
 (defun org-tickets--adf-blocks-to-org (nodes)
   "Render block NODES joined by single newlines."
@@ -292,13 +318,16 @@ sees nested content as belonging to the item."
   "Parse Jira ADF description ADF into Org text.
 Returns nil when ADF is nil or has no content.  Accepts both a full
 doc node and a bare content wrapper.  ID-MAP is an alist of attachment
-id or media UUID to filename, used to resolve media nodes."
+id or media UUID to filename, used to resolve media nodes.  Top-level
+blocks that render empty (Jira's empty paragraphs) are dropped, so they
+add no blank lines on each pull."
   (when adf
     (let* ((org-tickets--adf-attachment-id-map id-map)
            (content (seq-remove #'org-tickets--adf-empty-heading-p
                                 (org-tickets--adf-node-content adf)))
-           (text (mapconcat #'org-tickets--adf-top-block-to-org content "\n\n")))
-      (and (> (length text) 0) text))))
+           (blocks (seq-remove #'string-empty-p
+                               (mapcar #'org-tickets--adf-top-block-to-org content))))
+      (and blocks (mapconcat #'identity blocks "\n\n")))))
 
 (provide 'org-tickets-adf-import)
 ;;; org-tickets-adf-import.el ends here

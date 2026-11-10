@@ -73,7 +73,7 @@ emptied story-points property yields `:json-null' so Jira clears them."
         (story-points (org-tickets--ticket-story-points ticket)))
     (cond
      (labels (push (cons 'labels labels) fields))
-     ((org-tickets--ticket-clear-labels ticket)
+     ((and (not create-p) (org-tickets--ticket-clear-labels ticket))
       (push (cons 'labels (vector)) fields)))
     (cond
      ((and (numberp story-points) (> story-points 0))
@@ -101,7 +101,9 @@ docs/dev/links.md.
 
 On update (CREATE-P nil), org-absent fields are omitted;
 `clear-labels' emits an empty array and `clear-story-points' emits
-JSON null so emptied org properties actually clear in Jira."
+JSON null so emptied org properties actually clear in Jira.  A
+description with no visible content (e.g. only a COMMENT subtree) also
+emits JSON null, clearing the text Jira still shows."
   (let* ((create-p (plist-get args :create-p))
          (attachments (plist-get args :attachments))
          (fields (and create-p (org-tickets--create-only-fields ticket)))
@@ -113,8 +115,8 @@ JSON null so emptied org properties actually clear in Jira."
       (push (cons 'summary summary) fields))
     (when (org-tickets--field-present-p description)
       (let ((adf (org-tickets--build-adf-description description attachments)))
-        (when adf
-          (push (cons 'description adf) fields))))
+        (cond (adf (push (cons 'description adf) fields))
+              ((not create-p) (push (cons 'description :json-null) fields)))))
     (when (org-tickets--field-present-p fix-version)
       (push (cons 'fixVersions (list (list (cons "name" fix-version)))) fields))
     (setq fields (append (org-tickets--clearable-fields ticket create-p) fields))

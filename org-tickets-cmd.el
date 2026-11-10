@@ -55,8 +55,11 @@
 TYPE is stored as JIRA_TYPE.  PROPS is an alist of (NAME . VALUE) pairs
 stored on the new heading, in order.  Pairs whose value is nil or \"\"
 are skipped, except names in `org-tickets--template-keep-empty-props',
-which are written empty.  Point ends after the new entry's property
-drawer."
+which are written empty.  From mid-line, the heading starts on the next
+line.  Point ends after the new entry's property drawer."
+  (unless (bolp)
+    (forward-line 1)
+    (unless (bolp) (insert "\n")))
   (let ((start (point)))
     (insert stars " " summary "\n")
     (goto-char start)
@@ -181,25 +184,31 @@ union of local and Jira attachment names."
   (org-tickets--at-ticket-heading
     (org-tickets--remove-attachment filename)))
 
+(defun org-tickets--jira-attachment-ids (ticket-key filename)
+  "Return the ids of every Jira attachment of TICKET-KEY named FILENAME."
+  (delq nil
+        (mapcar (lambda (att)
+                  (and (equal (org-tickets--attachment-filename att) filename)
+                       (org-tickets--attachment-id att)))
+                (org-tickets--get-attachments ticket-key))))
+
 (defun org-tickets--remove-attachment (filename)
   "Remove attachment FILENAME for the ticket heading at point.
-Deletes it from Jira and from the local org-attach directory, whichever
-have it, and reports where it was removed from."
+Deletes it from Jira (every attachment with that name) and from the
+local org-attach directory, whichever have it, and reports where it
+was removed from."
   (let* ((heading-key (or (org-entry-get (point) "JIRA_KEY")
                           (error "No JIRA_KEY property on this heading")))
          (attach-dir (org-tickets--get-ticket-attach-dir nil))
-         (attachment (seq-find
-                      (lambda (att)
-                        (string= (org-tickets--attachment-filename att) filename))
-                      (org-tickets--get-attachments heading-key)))
-         (attachment-id (and attachment (org-tickets--attachment-id attachment)))
+         (attachment-ids (org-tickets--jira-attachment-ids heading-key filename))
          (local-path (and attach-dir (expand-file-name filename attach-dir)))
          (local-exists (and local-path (file-exists-p local-path)))
          (removed nil))
-    (unless (or attachment-id local-exists)
+    (unless (or attachment-ids local-exists)
       (error "File %s not found in attachment directory or Jira" filename))
-    (when attachment-id
-      (org-tickets--delete-attachment heading-key attachment-id)
+    (when attachment-ids
+      (dolist (id attachment-ids)
+        (org-tickets--delete-attachment heading-key id))
       (push "Jira" removed))
     (when local-exists
       (delete-file local-path)
@@ -252,7 +261,9 @@ and you need to sync those changes into your local org buffer."
 (defun org-tickets-insert-ticket-link ()
   "Insert a link to another Jira ticket."
   (interactive)
-  (let ((ticket-key (read-string "Ticket key: ")))
+  (let ((ticket-key (string-trim (read-string "Ticket key: "))))
+    (when (string-empty-p ticket-key)
+      (user-error "No ticket key given"))
     (org-tickets--insert-ticket-hyperlink ticket-key)))
 
 (provide 'org-tickets-cmd)

@@ -204,5 +204,18 @@ Story description.
     (should (string= (caar uploaded-to) "PROJ-200"))
     (should (string= (cdar uploaded-to) "my-diagram.png"))))
 
+(ert-deftest org-tickets-test--upload-thunks-match-quote-escaped-names ()
+  "A local file whose name has a double quote is not re-uploaded once Jira
+holds it under the percent-encoded name the upload sent."
+  (let ((dir (make-temp-file "org-tickets-upload" t)))
+    (unwind-protect
+        (progn
+          (dolist (name '("a\"b.txt" "new.txt"))
+            (write-region "x" nil (expand-file-name name dir)))
+          (let ((thunks (org-tickets--upload-thunks
+                         "P-1" dir '(((filename . "a%22b.txt"))))))
+            (should (= (length thunks) 1))))
+      (delete-directory dir t))))
+
 (provide 'org-tickets-test-attachments-upload)
 ;;; org-tickets-test-attachments-upload.el ends here

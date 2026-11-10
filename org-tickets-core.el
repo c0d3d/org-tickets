@@ -149,14 +149,18 @@ GET /rest/api/3/field and look for \"Sprint\"."
 
 (defun org-tickets--config-value (variable)
   "Return the value of configuration VARIABLE, a symbol.
-Signals a `user-error' naming VARIABLE when it is unset."
-  (or (symbol-value variable)
-      (user-error "`%s' is not set; customize it or set it in your init file"
-                  variable)))
+Signals a `user-error' naming VARIABLE when it is unset or a blank string."
+  (let ((value (symbol-value variable)))
+    (if (or (null value)
+            (and (stringp value) (string-empty-p (string-trim value))))
+        (user-error "`%s' is not set; customize it or set it in your init file"
+                    variable)
+      value)))
 
 (defun org-tickets--base-url ()
-  "Return `org-tickets-base-url', or signal a `user-error' when unset."
-  (org-tickets--config-value 'org-tickets-base-url))
+  "Return `org-tickets-base-url' without trailing slashes.
+Signals a `user-error' when it is unset."
+  (string-trim-right (org-tickets--config-value 'org-tickets-base-url) "/+"))
 
 (defun org-tickets--project-key ()
   "Return `org-tickets-project-key', or signal a `user-error' when unset."

@@ -108,6 +108,29 @@ Also restores point and window scroll to where they were when sync began."
   (org-tickets--progress-clear)
   (org-tickets--sync-restore-point))
 
+(defun org-tickets--sync-abort (doc org-buffer err)
+  "End the sync of DOC in ORG-BUFFER after ERR, unless it already ended.
+Unlocks the buffer and releases DOC's ticket markers.  A sync that
+already ran its cleanup is left alone, so a buffer the user made
+read-only is not unlocked by a second cleanup."
+  (org-tickets--safe-with-buffer
+   org-buffer
+   (lambda ()
+     (when org-tickets--sync-in-progress
+       (org-tickets--sync-cleanup))))
+  (org-tickets--release-ticket-markers doc)
+  (message "org-tickets: Sync failed: %S" err))
+
+(defmacro org-tickets--with-sync-abort (doc org-buffer &rest body)
+  "Run BODY, ending the sync of DOC in ORG-BUFFER if BODY signals an error.
+Response callbacks run long after the sync command returned, so an
+error there would otherwise leave ORG-BUFFER locked."
+  (declare (indent 2) (debug (form form body)))
+  (let ((err (make-symbol "err")))
+    `(condition-case ,err
+         (progn ,@body)
+       (error (org-tickets--sync-abort ,doc ,org-buffer ,err)))))
+
 ;;;; Phase 1: Create/Update Tickets
 
 (org-tickets--define-record org-tickets--sync-result
@@ -163,14 +186,16 @@ ORG-BUFFER is the originating buffer for progress tracking."
 
 (defun org-tickets--make-new-ticket-thunk (ticket org-buffer)
   "Create a thunk that POSTs TICKET as a new issue from ORG-BUFFER.
-The payload is built when the thunk RUNS, not when it is created.
+The payload is built when the thunk RUNS, not when it is created.  When
+ORG-BUFFER is dead by then nothing is sent and DONE gets an error result.
 Parent relationships are NOT part of the create payload -- they are
 issued as \"Blocks\" links in phase 2 (`org-tickets--async-sync-ticket-links')."
   (lambda (done)
-    (let ((fields (org-tickets--safe-with-buffer
-                   org-buffer
-                   (lambda ()
-                     (org-tickets--ticket-fields ticket :create-p t)))))
+    (if (not (buffer-live-p org-buffer))
+        (funcall done (org-tickets--sync-result-create
+                       :ticket ticket :is-new t
+                       :error "buffer killed before the ticket was created")
+                 nil)
       (org-tickets--async-request
        "POST" "/rest/api/3/issue"
        (lambda (response err)
@@ -182,7 +207,9 @@ issued as \"Blocks\" links in phase 2 (`org-tickets--async-sync-ticket-links')."
                           :sprint (when org-tickets-default-sprint
                                     (format "%s" org-tickets-default-sprint)))
                     nil)))
-       (list (cons 'fields fields))))))
+       (list (cons 'fields
+                   (with-current-buffer org-buffer
+                     (org-tickets--ticket-fields ticket :create-p t))))))))
 
 (defun org-tickets--make-ticket-thunk (ticket org-buffer)
   "Create the appropriate thunk for TICKET (new or existing).
@@ -226,20 +253,21 @@ the sync reported success."
     (org-tickets--async-batch
      feature-thunks
      (lambda (feature-results)
-       (let ((feature-records (mapcar #'car feature-results)))
-         (org-tickets--with-writable-buffer org-buffer
-           (org-tickets--apply-new-keys feature-records))
-         (let ((rest-thunks (mapcar (lambda (tk)
-                                      (org-tickets--make-ticket-thunk tk org-buffer))
-                                    (org-tickets--doc-non-feature-tickets doc))))
-           (org-tickets--async-batch
-            rest-thunks
-            (lambda (rest-results)
-              (org-tickets--sync-phase-2
-               doc
-               (append feature-records
-                       (mapcar #'car rest-results))
-               org-buffer)))))))))
+       (org-tickets--with-sync-abort doc org-buffer
+         (org-tickets--sync-phase-1-rest doc (mapcar #'car feature-results)
+                                         org-buffer))))))
+
+(defun org-tickets--sync-phase-1-rest (doc feature-records org-buffer)
+  "Apply FEATURE-RECORDS' new keys, then sync DOC's non-feature tickets.
+ORG-BUFFER is the source buffer.  Phase 2 starts once all are done."
+  (org-tickets--with-writable-buffer org-buffer
+    (org-tickets--apply-new-keys feature-records))
+  (org-tickets--async-batch
+   (mapcar (lambda (tk) (org-tickets--make-ticket-thunk tk org-buffer))
+           (org-tickets--doc-non-feature-tickets doc))
+   (lambda (rest-results)
+     (org-tickets--sync-phase-2
+      doc (append feature-records (mapcar #'car rest-results)) org-buffer))))
 
 ;;;; Phase 2: Attachments + Links
 
@@ -334,22 +362,25 @@ the pipeline hung)."
              (org-tickets--attachment-upload-step
               key attachments org-buffer description done))))))))
 
-(defun org-tickets--make-link-thunk (ticket)
-  "Create a thunk that asynchronously syncs issue links for TICKET."
+(defun org-tickets--make-link-thunk (ticket requested)
+  "Create a thunk that asynchronously syncs issue links for TICKET.
+REQUESTED is the hash table of links already requested this sync,
+shared by every link thunk so no link is POSTed twice."
   (lambda (done)
-    (org-tickets--async-sync-ticket-links
-     ticket (lambda () (funcall done nil nil)))))
+    (let ((org-tickets--links-requested requested))
+      (org-tickets--async-sync-ticket-links
+       ticket (lambda () (funcall done nil nil))))))
 
 (defun org-tickets--sync-phase-2 (doc phase-1-results org-buffer)
   "Phase 2: sync attachments and issue links concurrently.
 DOC is the parsed document.  PHASE-1-RESULTS is the list from phase 1.
-ORG-BUFFER is the originating buffer."
-  ;; First apply new keys from phase 1 so link/attachment functions can find tickets
-  (org-tickets--with-writable-buffer org-buffer
-    (org-tickets--apply-new-keys phase-1-results))
-  (let ((thunks (org-tickets--build-phase-2-thunks doc phase-1-results org-buffer)))
+ORG-BUFFER is the originating buffer.  An error ends the sync."
+  (org-tickets--with-sync-abort doc org-buffer
+    ;; First apply new keys from phase 1 so link/attachment functions can find tickets
+    (org-tickets--with-writable-buffer org-buffer
+      (org-tickets--apply-new-keys phase-1-results))
     (org-tickets--async-batch
-     thunks
+     (org-tickets--build-phase-2-thunks doc phase-1-results org-buffer)
      (lambda (_results)
        (org-tickets--sync-phase-3 doc phase-1-results org-buffer)))))
 
@@ -360,7 +391,8 @@ Every RESULT carries its ticket."
 
 (defun org-tickets--build-phase-2-thunks (doc phase-1-results org-buffer)
   "Build thunks for phase 2 from DOC, PHASE-1-RESULTS, and ORG-BUFFER."
-  (let ((thunks nil))
+  (let ((thunks nil)
+        (requested (make-hash-table :test #'equal)))
     ;; Attachment thunks for tickets with keys
     (dolist (result phase-1-results)
       (let ((key (org-tickets--sync-result-key result))
@@ -372,7 +404,7 @@ Every RESULT carries its ticket."
                 thunks))))
     ;; Link thunks for all tickets
     (dolist (ticket (org-tickets--doc-tickets doc))
-      (push (org-tickets--make-link-thunk ticket) thunks))
+      (push (org-tickets--make-link-thunk ticket requested) thunks))
     (nreverse thunks)))
 
 ;;;; Phase 3: Apply Results to Buffer
@@ -488,19 +520,21 @@ buffer is fetched from Jira at most once."
 (defun org-tickets--sync-phase-3 (doc phase-1-results org-buffer)
   "Phase 3: apply all results to the org buffer synchronously.
 DOC is the parsed document.  PHASE-1-RESULTS is the list from phase 1.
-ORG-BUFFER is the originating buffer."
+ORG-BUFFER is the originating buffer.  The buffer is unlocked and the
+markers released even when applying a result signals an error."
   (let ((ticket-count (length (org-tickets--doc-tickets doc)))
         (error-count (org-tickets--count-phase-1-errors phase-1-results)))
     (org-tickets--safe-with-buffer
      org-buffer
      (lambda ()
-       (let ((inhibit-read-only t))
-         (org-tickets--apply-sprint-updates phase-1-results)
-         (org-tickets--apply-due-date-updates phase-1-results)
-         (org-tickets--apply-due-date-inheritance doc)
-         (org-tickets--resolve-blocked-by-in-org doc))
-       (org-tickets--sync-cleanup)
-       (org-tickets--release-ticket-markers doc)))
+       (unwind-protect
+           (let ((inhibit-read-only t))
+             (org-tickets--apply-sprint-updates phase-1-results)
+             (org-tickets--apply-due-date-updates phase-1-results)
+             (org-tickets--apply-due-date-inheritance doc)
+             (org-tickets--resolve-blocked-by-in-org doc))
+         (org-tickets--sync-cleanup)
+         (org-tickets--release-ticket-markers doc))))
     (if (> error-count 0)
         (message "org-tickets: Sync complete (%d tickets, %d errors)"
                  ticket-count error-count)

@@ -32,22 +32,22 @@ Test files mirror source modules:
 
 | Source | Test file |
 |--------|-----------|
-| `org-tickets-core.el` | `org-tickets-test-record.el` (the `org-tickets--define-record` macro, `--alist-get`, `--ensure-list`), `org-tickets-test-options.el` (the `org-tickets-needs-sizing-label` and `org-tickets-fix-version-months` options) |
-| `org-tickets-api.el` (config, credentials, request encoding, HTTP response parsing, issue types, sprint listing/resolution, issue accessors) | `org-tickets-test-api.el` |
-| `org-tickets-async.el` | `org-tickets-test-async.el` (async requests, batching, rate limiting, progress) |
-| `org-tickets-parse.el` | `org-tickets-test-parse.el` (descriptions, parent keys, document parsing), `org-tickets-test-parse-properties.el` (validation, sprint, due date, BLOCKED-BY, whitespace and CSV properties) |
-| `org-tickets-fields.el` | `org-tickets-test-fields.el` |
-| `org-tickets-convert.el` | `org-tickets-test-convert.el`, `org-tickets-test-convert-nodes.el`, `org-tickets-test-macro.el` (org macros in descriptions), `org-tickets-test-list-continuation.el` (continuation-line indentation), `org-tickets-test-ordered-start.el` (ordered list start numbers) |
-| `org-tickets-import.el` | `org-tickets-test-import.el` (issue -> ticket -> org, pulling into a heading) |
-| `org-tickets-adf-import.el` | `org-tickets-test-import-adf.el` (ADF -> org text), `org-tickets-test-roundtrip.el` (org<->ADF round-trips) |
+| `org-tickets-core.el` | `org-tickets-test-record.el` (the `org-tickets--define-record` macro, `--alist-get`, `--ensure-list`, attachment accessors), `org-tickets-test-core.el` (required-config accessors, parent/child type predicates), `org-tickets-test-options.el` (the `org-tickets-needs-sizing-label` and `org-tickets-fix-version-months` options) |
+| `org-tickets-api.el` (config, credentials, request encoding, HTTP response parsing, issue types, sprint listing/resolution, issue accessors) | `org-tickets-test-api.el`, `org-tickets-test-api-errors.el` (sync request failures, credential/issue-type errors, status-line parsing, sprint pagination edge cases, sprint resolution through the board) |
+| `org-tickets-async.el` | `org-tickets-test-async.el` (async requests, batching, rate limiting, progress), `org-tickets-test-async-queue.el` (queue draining after failures, throttling, the two concurrency caps, killed requesting buffers, a thunk calling DONE twice) |
+| `org-tickets-parse.el` | `org-tickets-test-parse.el` (descriptions, parent keys, document parsing, issue-types keyword), `org-tickets-test-parse-properties.el` (validation, sprint, due date, BLOCKED-BY, whitespace and CSV properties) |
+| `org-tickets-fields.el` | `org-tickets-test-fields.el` (payload fields, STORY_POINTS parsing and clearing) |
+| `org-tickets-convert.el` | `org-tickets-test-convert.el`, `org-tickets-test-convert-nodes.el`, `org-tickets-test-convert-elements.el` (list tags/checkboxes, links, edge-case tables, drawers, footnotes, targets, small branches), `org-tickets-test-macro.el` (org macros in descriptions), `org-tickets-test-list-continuation.el` (continuation-line indentation), `org-tickets-test-ordered-start.el` (ordered list start numbers) |
+| `org-tickets-import.el` | `org-tickets-test-import.el` (issue -> ticket -> org, pulling into a heading), `org-tickets-test-import-fields.el` (issue links, attachment id map, properties a pull writes or clears, description replacement, `org-tickets-import-feature`) |
+| `org-tickets-adf-import.el` | `org-tickets-test-import-adf.el` (ADF -> org text), `org-tickets-test-import-adf-nodes.el` (less common nodes and marks, empty paragraphs, header-only tables, unknown nodes, blocks in list items), `org-tickets-test-roundtrip.el` (org<->ADF round-trips) |
 | Description headings (parse, convert, import) | `org-tickets-test-headings-push.el` (org -> ADF, description boundaries), `org-tickets-test-headings-pull.el` (ADF -> org, pulls, round-trips) |
-| `org-tickets-attachments.el` | `org-tickets-test-attachments-upload.el`, `org-tickets-test-attachments-sync.el`, `org-tickets-test-attachments-async.el` |
-| `org-tickets-graph.el` | `org-tickets-test-graph.el` (graph model nodes/edges, loop detection, DOT output, `org-tickets-graph` command; Graphviz-dependent tests skip without `dot`; `--with-graph-file` runs the command on a temp file in a spaced directory) |
-| `org-tickets-links.el` | `org-tickets-test-sync-links.el` (Blocks link creation and per-ticket link sync) |
+| `org-tickets-attachments.el` | `org-tickets-test-attachments-upload.el`, `org-tickets-test-attachments-sync.el`, `org-tickets-test-attachments-async.el`, `org-tickets-test-attachments-download.el` (redirect/response edge cases, skip-if-current, dedup, multipart filenames, `--attachment-names`) |
+| `org-tickets-graph.el` | `org-tickets-test-graph.el` (graph model nodes/edges, loop detection, DOT output, `org-tickets-graph` command; Graphviz-dependent tests skip without `dot`; `--with-graph-file` runs the command on a temp file in a spaced directory), `org-tickets-test-graph-edges.el` (node ids, parent edges through nesting, parse-failure cleanup), `org-tickets-test-graph-render.el` (node styling, summary text, running `dot` with `call-process-region` stubbed) |
+| `org-tickets-links.el` | `org-tickets-test-sync-links.el` (Blocks link creation, per-ticket link sync, duplicate/self/missing-key links) |
 | `org-tickets-inherit.el` | `org-tickets-test-inheritance.el` (DUE_DATE/FIX_VERSION inheritance), `org-tickets-test-sync-due-date.el` (due date in payloads and external parents) |
-| `org-tickets-sync-phases.el` | `org-tickets-test-sync-flow.el` (whole pipeline, phase ordering, buffer protection, key write-back, BLOCKED-BY write-back), `org-tickets-test-sync-flow-phase2.el` (attachment thunks) |
-| `org-tickets-sync.el` | `org-tickets-test-sync.el` (org property helpers, payloads), `org-tickets-test-sync-sprint.el` (sprint and fix version in create/update payloads) |
-| `org-tickets-cmd.el` | `org-tickets-test-cmd.el`, `org-tickets-test-cmd-ticket-at-point.el` (commands run from inside a ticket's description headings) |
+| `org-tickets-sync-phases.el` | `org-tickets-test-sync-flow.el` (whole pipeline, phase ordering, buffer protection, key write-back, BLOCKED-BY write-back), `org-tickets-test-sync-flow-phase2.el` (attachment thunks), `org-tickets-test-sync-errors.el` (failed requests, killed buffer, errors in late callbacks still unlocking the buffer, phase-3 write-back helpers) |
+| `org-tickets-sync.el` | `org-tickets-test-sync.el` (org property helpers, payloads), `org-tickets-test-sync-sprint.el` (sprint and fix version in create/update payloads), `org-tickets-test-sync-commands.el` (story creation, block links, fix version, sizing label, issue-type loading) |
+| `org-tickets-cmd.el` | `org-tickets-test-cmd.el`, `org-tickets-test-cmd-attach.el` (attach add/list/remove commands), `org-tickets-test-cmd-ticket-at-point.el` (commands run from inside a ticket's description headings) |
 
 Test files live in `test/` and are loaded by `test/org-tickets-test.el` (the test runner entry point), which holds only `require`s; each test file `provide`s its own feature and passes when loaded on its own. Put a test in the file for the module it exercises, not the one that happens to share its fixtures.
 

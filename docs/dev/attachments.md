@@ -65,17 +65,32 @@ attachments survive intact, and sends it through the rate-limited
 with `format-time-string`) is concatenated with a binary body. The regression test
 `org-tickets-test--async-upload-attachment-sends-multipart-form` pins this contract.
 
+The `filename` in the part's `Content-Disposition` is a quoted string, so
+`org-tickets--multipart-quote-filename` percent-encodes `"`, CR and LF (as
+browsers do); non-ASCII names are sent as raw UTF-8. Jira stores such a name
+literally (e.g. `a%22b.txt`), so a local file whose name contains `"` never
+matches its Jira copy by name and is re-uploaded on each sync.
+
 ### Download redirects
 
 Jira answers attachment content requests with a redirect to a signed media URL.
 `org-tickets--http-fetch-to-file` binds `url-max-redirections` to 0 and follows
 the `Location` itself **without** the request headers, because url.el would
-otherwise resend the `Authorization` header to the redirect host.
+otherwise resend the `Authorization` header to the redirect host. A relative
+`Location` resolves against the original URL (same host) and is still fetched
+without credentials. A 3xx with no `Location`, or more than
+`org-tickets--max-download-redirects` redirects, fails the download without
+writing a file.
 
 ### Download (Jira → org)
 1. `org-tickets--download-attachments` ensures the heading has an `:ID:`
 2. Creates the attach dir if needed
-3. Downloads files not already present locally
+3. Downloads files not already present locally (same name and the size Jira
+   reports; an attachment with no size is always downloaded)
+
+Files are saved under the attach dir by the base name of Jira's filename
+(`org-tickets--attachment-local-path`), so a name with directory parts cannot
+write outside it.
 
 ## Inline Embedding in Descriptions
 
@@ -136,4 +151,5 @@ If a ticket has multiple Jira attachments sharing the same filename (e.g.
 re-uploaded revisions of the same file), downloading collapses them to a
 single local file: `org-tickets--dedup-attachments-by-filename` keeps only the
 entry with the newest `created` timestamp per filename before the download
-step runs, so the local file always ends up as the latest version.
+step runs, so the local file always ends up as the latest version. An entry
+with no `created` counts as oldest; an entry with no filename is dropped.

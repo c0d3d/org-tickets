@@ -462,6 +462,97 @@ parent link; a type org-tickets has never heard of must not repeat it."
       (should (equal (cdr (assq 'labels (cdr (assq 'fields data)))) '("Team")))
       (should (equal (org-tickets-test--payload-due-date data) "2026-09-30")))))
 
+;;;; Parent resolution edge cases
+
+(defun org-tickets-test--inherit-in (text)
+  "Run the buffer inheritance pass over org TEXT with Jira fetches logged.
+Return (BUFFER-TEXT . FETCHED-KEYS); every fetch fails."
+  (let ((fetched nil))
+    (org-tickets-test--with-stubs
+        ((org-tickets--get-ticket (lambda (key)
+                                    (push key fetched)
+                                    (error "Jira API error: 404")))
+         (message #'ignore))
+      (with-temp-buffer
+        (org-mode)
+        (insert text)
+        (org-tickets--inherit-parent-properties-in-buffer)
+        (cons (buffer-string) (nreverse fetched))))))
+
+(defun org-tickets-test--due-date-in (text key)
+  "Return the DUE_DATE of ticket KEY in org TEXT."
+  (with-temp-buffer
+    (org-mode)
+    (insert text)
+    (org-tickets-test--prop-of key "DUE_DATE")))
+
+(ert-deftest org-tickets-test--invalid-parent-falls-back-to-ancestor ()
+  "A PARENT that is not a ticket key is ignored, never fetched, and the
+outline ancestor supplies the value."
+  (dolist (parent '("" "foo" "p-1"))
+    (let ((result (org-tickets-test--inherit-in
+                   (concat "* F\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
+                           ":DUE_DATE: 2026-08-01\n:END:\n"
+                           "** S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
+                           ":PARENT: " parent "\n:END:\n"))))
+      (should (equal (org-tickets-test--due-date-in (car result) "P-2") "2026-08-01"))
+      (should-not (cdr result)))))
+
+(ert-deftest org-tickets-test--failed-parent-fetch-is-not-retried ()
+  "Two children of one parent that cannot be fetched cause one fetch."
+  (let ((result (org-tickets-test--inherit-in
+                 (concat "* A\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
+                         ":PARENT: P-1\n:END:\n"
+                         "* B\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-3\n"
+                         ":PARENT: P-1\n:END:\n"))))
+    (should (equal (cdr result) '("P-1")))
+    (should-not (org-tickets-test--due-date-in (car result) "P-2"))
+    (should-not (org-tickets-test--due-date-in (car result) "P-3"))))
+
+(ert-deftest org-tickets-test--grandchild-inherits-through-parent ()
+  "A grandchild inherits through a parent that inherited in the same
+pass, whether linked by outline or by PARENT."
+  (dolist (text
+           (list (concat "* F\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
+                         ":DUE_DATE: 2026-08-01\n:END:\n"
+                         "** S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n:END:\n"
+                         "*** T\n:PROPERTIES:\n:JIRA_TYPE: Sub-task\n:JIRA_KEY: P-3\n:END:\n")
+                 (concat "* F\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
+                         ":DUE_DATE: 2026-08-01\n:END:\n"
+                         "* S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
+                         ":PARENT: P-1\n:END:\n"
+                         "* T\n:PROPERTIES:\n:JIRA_TYPE: Sub-task\n:JIRA_KEY: P-3\n"
+                         ":PARENT: P-2\n:END:\n")))
+    (let ((result (org-tickets-test--inherit-in text)))
+      (should (equal (org-tickets-test--due-date-in (car result) "P-3") "2026-08-01"))
+      (should-not (cdr result)))))
+
+(ert-deftest org-tickets-test--blank-due-date-is-inherited ()
+  "A blank or whitespace-only DUE_DATE counts as empty and is filled."
+  (dolist (value '("" "   "))
+    (let ((result (org-tickets-test--inherit-in
+                   (concat "* F\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
+                           ":DUE_DATE: 2026-08-01\n:END:\n"
+                           "** S\n:PROPERTIES:\n:JIRA_TYPE: Story\n:JIRA_KEY: P-2\n"
+                           ":DUE_DATE: " value "\n:END:\n"))))
+      (should (equal (org-tickets-test--due-date-in (car result) "P-2")
+                     "2026-08-01")))))
+
+(ert-deftest org-tickets-test--inherit-due-date-ignores-story-not-in-buffer ()
+  "Inheriting for a story key absent from the buffer changes and fetches nothing."
+  (let ((fetched nil)
+        (text (concat "* F\n:PROPERTIES:\n:JIRA_TYPE: Feature\n:JIRA_KEY: P-1\n"
+                      ":DUE_DATE: 2026-08-01\n:END:\n")))
+    (org-tickets-test--with-stubs
+        ((org-tickets--get-ticket (lambda (key) (push key fetched) nil)))
+      (with-temp-buffer
+        (org-mode)
+        (insert text)
+        (org-tickets--inherit-due-date "P-404" "P-1")
+        (org-tickets--inherit-due-date "P-404" "P-777")
+        (should (equal (buffer-string) text))))
+    (should-not fetched)))
+
 (provide 'org-tickets-test-inheritance)
 
 ;;; org-tickets-test-inheritance.el ends here

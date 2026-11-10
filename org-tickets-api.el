@@ -130,14 +130,22 @@ Decodes the buffer as utf-8 first.  Returns a plist
   (set-buffer-multibyte t)
   (decode-coding-region (point-min) (point-max) 'utf-8)
   (goto-char (point-min))
-  (if (re-search-forward "^$" nil t)
+  (if (re-search-forward "^\r?$" nil t)
       (list :status (buffer-substring-no-properties (point-min) (point))
             :body (buffer-substring-no-properties (point) (point-max)))
     (list :status "" :body "")))
 
+(defun org-tickets--http-status-code (status)
+  "Return the numeric code of the status line opening STATUS text, or nil.
+Only the first line is read, so headers never affect the result."
+  (when (string-match "\\`HTTP/[^ \r\n]+ \\([0-9]\\{3\\}\\)\\([ \r\n]\\|\\'\\)"
+                      status)
+    (string-to-number (match-string 1 status))))
+
 (defun org-tickets--http-success-p (status)
-  "Return non-nil when STATUS text carries a 2xx HTTP status."
-  (string-match-p "HTTP/.* 2[0-9][0-9]" status))
+  "Return non-nil when STATUS text's status line carries a 2xx HTTP status."
+  (let ((code (org-tickets--http-status-code status)))
+    (and code (<= 200 code 299))))
 
 (defun org-tickets--http-parse-json-body (body)
   "Parse BODY as JSON with the project-standard settings.

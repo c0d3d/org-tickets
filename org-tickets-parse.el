@@ -112,9 +112,20 @@ Blank entries are dropped; an absent or blank property gives nil."
 ;;;; Ticket Parsing from Org
 
 (defun org-tickets--parse-document ()
-  "Parse the current org buffer and return an org-tickets--doc struct."
-  (let ((tickets (delq nil (org-map-entries #'org-tickets--parse-ticket-at-point))))
-    (org-tickets--doc-create :tickets tickets)))
+  "Parse the current org buffer and return an org-tickets--doc struct.
+If any ticket fails to parse, the markers of those already parsed are
+released before the error propagates."
+  (let ((parsed nil))
+    (condition-case err
+        (org-map-entries
+         (lambda ()
+           (when-let* ((ticket (org-tickets--parse-ticket-at-point)))
+             (push ticket parsed))))
+      (error
+       (dolist (ticket parsed)
+         (set-marker (org-tickets--ticket-marker ticket) nil))
+       (signal (car err) (cdr err))))
+    (org-tickets--doc-create :tickets (nreverse parsed))))
 
 (defun org-tickets--doc-non-feature-tickets (doc)
   "Return DOC's tickets that are not features, in document order.
@@ -137,16 +148,36 @@ An invalid value is reported via `message' using the ticket's key or TITLE."
                                  title))
              nil))))
 
+(defun org-tickets--story-points-property (title)
+  "Return the STORY_POINTS property at point as (POINTS . CLEAR).
+POINTS is the number, or nil when absent, blank or not numeric.  CLEAR
+is non-nil when the property is present but blank or 0, asking Jira to
+clear its estimate.  A non-numeric value (e.g. \"TBD\") is neither sent
+nor cleared, and is reported with `display-warning' naming the ticket's
+key or TITLE."
+  (let ((raw (org-entry-get (point) "STORY_POINTS"))
+        (value (org-tickets--heading-property "STORY_POINTS")))
+    (cond ((null raw) nil)
+          ((null value) (cons nil t))
+          ((string-match-p "\\`[-+]?[0-9]*\\.?[0-9]+\\'" value)
+           (let ((points (string-to-number value)))
+             (cons points (= points 0))))
+          (t (display-warning
+              'org-tickets
+              (format "Ignoring non-numeric STORY_POINTS %S on %s"
+                      value (or (org-tickets--heading-property "JIRA_KEY")
+                                title)))
+             nil))))
+
 (defun org-tickets--parse-ticket-at-point ()
   "Parse a ticket from the org heading at point.
 Returns an org-tickets--ticket struct or nil if not a valid ticket."
   (let ((element (org-element-at-point))
-        (type-prop (org-entry-get (point) "JIRA_TYPE"))
-        (story-points-str (org-entry-get (point) "STORY_POINTS")))
+        (type-prop (org-entry-get (point) "JIRA_TYPE")))
     (when type-prop
-      (let ((title (or (org-element-property :raw-value element) ""))
-            (labels (org-tickets--csv-property "LABELS"))
-            (story-points (org-tickets--heading-property "STORY_POINTS")))
+      (let* ((title (or (org-element-property :raw-value element) ""))
+             (labels (org-tickets--csv-property "LABELS"))
+             (story-points (org-tickets--story-points-property title)))
         (org-tickets--check-ticket-level
          type-prop title (org-element-property :level element))
         (org-tickets--ticket-create
@@ -156,7 +187,7 @@ Returns an org-tickets--ticket struct or nil if not a valid ticket."
          :description (org-tickets--get-ticket-description)
          :fix-version (org-entry-get (point) "FIX_VERSION")
          :labels labels
-         :story-points (and story-points (string-to-number story-points))
+         :story-points (car story-points)
          :blocks (org-tickets--csv-property "BLOCKS")
          :blocked-by (org-tickets--csv-property "BLOCKED-BY")
          :parent (org-tickets--valid-parent-property title)
@@ -165,9 +196,7 @@ Returns an org-tickets--ticket struct or nil if not a valid ticket."
          :attachments nil  ; Populated from Jira during sync
          :marker (copy-marker (org-element-property :begin element))
          :clear-labels (and (org-entry-get (point) "LABELS") (null labels))
-         :clear-story-points (and story-points-str
-                                  (or (null story-points)
-                                      (= 0 (string-to-number story-points)))))))))
+         :clear-story-points (cdr story-points))))))
 
 (defun org-tickets--description-end (limit)
   "Return where the description of the ticket heading at point ends.
@@ -233,11 +262,17 @@ never the heading itself."
 ;;;; Issue types keyword
 
 (defun org-tickets--parse-issue-type-pair (pair)
-  "Parse PAIR, a \"NAME=ID\" string, into (NAME . ID), or nil if malformed."
-  (when (string-match "\\(.+\\)=\\(.+\\)" pair)
+  "Parse PAIR, a \"NAME=ID\" string, into (NAME . ID), or nil if malformed.
+PAIR splits at its last `=', since ids are numeric and names are not.
+A blank NAME or ID is malformed."
+  (when (string-match "\\`\\(.*\\)=\\([^=]*\\)\\'" pair)
     (let ((name (match-string-no-properties 1 pair))
           (id (match-string-no-properties 2 pair)))
-      (cons (string-trim name) (string-trim id)))))
+      ;; Trim only now: `string-trim' clobbers the match data.
+      (setq name (string-trim name)
+            id (string-trim id))
+      (unless (or (string-empty-p name) (string-empty-p id))
+        (cons name id)))))
 
 (defun org-tickets--load-issue-types ()
   "Return the issue types in the #+JIRA_ISSUE_TYPES keyword, or nil.
@@ -246,7 +281,8 @@ alist of (NAME . ID) strings.  Point is left alone and keywords inside
 src blocks are ignored."
   (let ((raw (cadar (org-collect-keywords '("JIRA_ISSUE_TYPES")))))
     (unless (or (null raw) (string= raw ""))
-      (mapcar #'org-tickets--parse-issue-type-pair (split-string raw "," t)))))
+      (delq nil (mapcar #'org-tickets--parse-issue-type-pair
+                        (split-string raw "," t))))))
 
 (defun org-tickets--format-issue-types (issue-types)
   "Format ISSUE-TYPES, an alist of (NAME . ID), as a #+JIRA_ISSUE_TYPES line."

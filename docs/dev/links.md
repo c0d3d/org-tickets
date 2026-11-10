@@ -43,6 +43,14 @@ Tickets in org-mode use two properties for block relationships:
 
 During sync, `BLOCKED-BY` is also resolved: if PROJ-200 has `BLOCKED-BY: PROJ-100`, a "Blocks" link is created from PROJ-100 to PROJ-200.
 
+Each distinct link is POSTed once per sync. `org-tickets--ticket-link-pairs`
+drops self-links and duplicates within one ticket (e.g. a `PARENT` that is
+also listed in `BLOCKS`), and phase 2 shares one table of requested links
+(`org-tickets--links-requested`) across all tickets, so PROJ-100
+`BLOCKS: PROJ-200` plus PROJ-200 `BLOCKED-BY: PROJ-100` sends one request.
+A key in both `BLOCKS` and `BLOCKED-BY` of the same ticket names two links
+(opposite directions, a cycle); both are sent.
+
 ## Parents Are Blocks Links, Not Jira's Parent Field
 
 A child ticket's parent is expressed **only** as a "Blocks" issue link (the

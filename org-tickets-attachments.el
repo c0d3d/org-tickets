@@ -48,7 +48,7 @@ A successful body is written verbatim to PATH.  Returns (:saved PATH),
         (let ((coding-system-for-write 'no-conversion))
           (write-region (point) (point-max) path nil 'silent))
         (list :saved path))
-       ((and (string-match-p "\\`HTTP/[^ ]* 3[0-9][0-9]" headers)
+       ((and (<= 300 (or (org-tickets--http-status-code headers) 0) 399)
              (string-match "^Location:[ \t]*\\([^\r\n]+\\)" headers))
         (list :redirect (match-string 1 headers)))
        (t (list :error (car (split-string headers "\r?\n"))))))))
@@ -86,12 +86,18 @@ A nil SIZE never matches."
        (file-exists-p path)
        (= (file-attribute-size (file-attributes path)) size)))
 
+(defun org-tickets--attachment-local-path (filename dir)
+  "Return where the Jira attachment FILENAME is stored in DIR.
+Directory parts of FILENAME are dropped, so a name such as
+\"../x\" from Jira cannot place a file outside DIR."
+  (expand-file-name (file-name-nondirectory filename) dir))
+
 (defun org-tickets--async-download-attachment (url filename dir size callback)
   "Asynchronously download attachment from URL to FILENAME in DIR.
-SIZE is the expected file size from Jira metadata.  If a local file
-exists with matching name and size, the download is skipped.
-CALLBACK is (lambda (path err) ...) called on completion."
-  (let ((local-path (expand-file-name filename dir)))
+SIZE is the expected file size from Jira metadata, or nil when unknown.
+If a local file exists with matching name and size, the download is
+skipped.  CALLBACK is (lambda (path err) ...) called on completion."
+  (let ((local-path (org-tickets--attachment-local-path filename dir)))
     (if (org-tickets--local-attachment-current-p local-path size)
         (progn
           (when org-tickets-debug
@@ -125,6 +131,16 @@ holds raw bytes, and `format-time-string' returns a multibyte string."
            (random (expt 16 8)))
    'us-ascii))
 
+(defun org-tickets--multipart-quote-filename (filename)
+  "Return FILENAME escaped for a quoted multipart Content-Disposition value.
+Double quote, CR and LF are percent-encoded as browsers do (WHATWG
+multipart/form-data encoding); other characters, including non-ASCII,
+pass through to be sent as UTF-8."
+  (replace-regexp-in-string
+   "[\"\r\n]"
+   (lambda (c) (format "%%%02X" (string-to-char c)))
+   filename t t))
+
 (defun org-tickets--multipart-file-body (boundary file-path)
   "Build the multipart/form-data body uploading FILE-PATH under field \"file\".
 
@@ -137,7 +153,8 @@ raw file bytes verbatim, safe to send as a binary request body."
       (insert (encode-coding-string
                (concat "--" boundary "\r\n"
                        "Content-Disposition: form-data; name=\"file\"; filename=\""
-                       filename "\"\r\n"
+                       (org-tickets--multipart-quote-filename filename)
+                       "\"\r\n"
                        "Content-Type: application/octet-stream\r\n\r\n")
                'utf-8)))
     (insert-file-contents-literally file-path)
@@ -175,9 +192,10 @@ CALLBACK is (lambda (response err) ...) called on completion."
 (defun org-tickets--dedup-attachments-by-filename (attachments)
   "Collapse ATTACHMENTS to one entry per filename, keeping the newest.
 Jira's `created' timestamps are ISO-8601, so lexicographic comparison
-orders them correctly."
+orders them correctly; an entry without one counts as oldest.  Entries
+without a filename cannot be saved and are dropped."
   (let ((seen (make-hash-table :test #'equal)))
-    (dolist (att attachments)
+    (dolist (att (seq-filter #'org-tickets--attachment-filename attachments))
       (let* ((name (org-tickets--attachment-filename att))
              (created (or (org-tickets--attachment-created att) ""))
              (existing (gethash name seen)))
@@ -195,14 +213,15 @@ current locally are skipped."
    (lambda (att)
      (let ((filename (org-tickets--attachment-filename att))
            (url (org-tickets--attachment-content-url att))
-           (size (or (org-tickets--attachment-size att) 0)))
+           (size (org-tickets--attachment-size att)))
        (lambda (done)
          (org-tickets--async-download-attachment
           url filename attach-dir size done))))
    (seq-remove
     (lambda (att)
       (org-tickets--local-attachment-current-p
-       (expand-file-name (org-tickets--attachment-filename att) attach-dir)
+       (org-tickets--attachment-local-path
+        (org-tickets--attachment-filename att) attach-dir)
        (org-tickets--attachment-size att)))
     (org-tickets--dedup-attachments-by-filename attachments))))
 
@@ -226,7 +245,8 @@ CALLBACK is (lambda (results err) ...) called when all downloads finish."
 
 (defun org-tickets--upload-thunks (ticket-key dir jira-attachments)
   "Return async thunks uploading files in DIR missing from JIRA-ATTACHMENTS.
-Each thunk uploads one file to TICKET-KEY."
+Each thunk uploads one file to TICKET-KEY.  A file counts as present when
+Jira has it under its own name or under the escaped name the upload sent."
   (let ((jira-filenames (mapcar #'org-tickets--attachment-filename
                                 jira-attachments)))
     (mapcar
@@ -234,7 +254,10 @@ Each thunk uploads one file to TICKET-KEY."
        (let ((file-path (expand-file-name file dir)))
          (lambda (done)
            (org-tickets--async-upload-attachment ticket-key file-path done))))
-     (seq-remove (lambda (f) (member f jira-filenames))
+     (seq-remove (lambda (f)
+                   (or (member f jira-filenames)
+                       (member (org-tickets--multipart-quote-filename f)
+                               jira-filenames)))
                  (org-attach-file-list dir)))))
 
 (defun org-tickets--async-upload-attachments (ticket-key jira-attachments callback)

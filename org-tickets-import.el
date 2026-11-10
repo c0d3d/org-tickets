@@ -34,7 +34,7 @@
   "Return SUMMARY with a leading \"TYPE: \" prefix removed, if present.
 Jira often prepends the issue type to the summary; strip it so the org
 headline shows only the summary text."
-  (if (and type (string-match (concat "^" (regexp-quote type) ": ") summary))
+  (if (and type summary (string-match (concat "^" (regexp-quote type) ": ") summary))
       (substring summary (match-end 0))
     summary))
 
@@ -203,13 +203,23 @@ Push never sends these, so pull keeps them.  Point is not moved."
         (push (org-tickets--next-comment-subtree end) subtrees))
       (nreverse (delq nil subtrees)))))
 
+(defun org-tickets--bare-heading-region ()
+  "Return the region after a heading with no contents.
+It runs from the end of the headline to the start of the next line, so
+it has the same shape as `org-tickets--description-region'."
+  (save-excursion
+    (org-back-to-heading t)
+    (end-of-line)
+    (cons (point) (min (1+ (point)) (point-max)))))
+
 (defun org-tickets--replace-description (description)
   "Replace the description of the ticket heading at point with DESCRIPTION.
 COMMENT subtrees in the old description are kept, after DESCRIPTION.
-The region starts at the end of the :END: line, so the newline the
-deletion consumes is always restored; a nil DESCRIPTION leaves an empty
-body.  Point is preserved."
-  (let* ((region (org-tickets--description-region))
+The region starts at the end of the :END: line (or the headline, when the
+heading has no contents), so the newline the deletion consumes is always
+restored; a nil DESCRIPTION leaves an empty body.  Point is preserved."
+  (let* ((region (or (org-tickets--description-region)
+                     (org-tickets--bare-heading-region)))
          (comments (and region (org-tickets--comment-subtrees
                                 (car region) (cdr region)))))
     (when region

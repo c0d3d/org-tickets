@@ -34,6 +34,10 @@ Each element is an alist with keys \"id\", \"filename\", and
 \"mediaApiFileId\" (the Media Services UUID Jira requires in ADF
 media nodes).")
 
+(defvar org-tickets--adf-macro-templates nil
+  "Macro templates for the current ADF conversion, as (NAME . TEMPLATE).
+Dynamically bound during `org-tickets--build-adf-description'.")
+
 ;;;; ADF Conversion Helpers
 
 (defun org-tickets--adf-text-node (text &optional mark-type)
@@ -293,13 +297,75 @@ attribute."
            (mapcan #'org-tickets--convert-to-adf-list-item
                    (org-element-contents element))))))
 
+(defconst org-tickets--checkbox-text
+  '((on . "[X]") (off . "[ ]") (trans . "[-]"))
+  "Org source text of each list item checkbox state.")
+
+(defun org-tickets--list-item-prefix (element)
+  "Return inline ADF nodes for list item ELEMENT's checkbox and tag.
+ADF has no checkbox or description-term node, so both push as their org
+source text (\"[X] Term ::\"), which the importer reads back as the
+same item.  Nil when ELEMENT has neither."
+  (let ((checkbox (cdr (assq (org-element-property :checkbox element)
+                             org-tickets--checkbox-text)))
+        (tag (org-element-property :tag element)))
+    (append (org-tickets--adf-text-node
+             (concat checkbox (and checkbox tag " ")))
+            (when tag
+              (append (org-tickets--build-inline-nodes tag)
+                      (org-tickets--adf-text-node " ::"))))))
+
+(defun org-tickets--prepend-to-first-paragraph (prefix blocks)
+  "Return ADF BLOCKS with inline PREFIX nodes leading the first paragraph.
+A space separates PREFIX from that paragraph's text.  When BLOCKS does
+not start with a paragraph, PREFIX becomes a paragraph of its own."
+  (let ((first (car blocks)))
+    (cond ((null prefix) blocks)
+          ((equal (cdr (assoc "type" first)) "paragraph")
+           (cons (org-tickets--adf-node
+                  "paragraph" nil
+                  (append prefix (org-tickets--adf-text-node " ")
+                          (cdr (assoc "content" first))))
+                 (cdr blocks)))
+          (t (cons (org-tickets--adf-node "paragraph" nil prefix) blocks)))))
+
 (defun org-tickets--convert-to-adf-list-item (element)
   "Convert org ELEMENT (type item) to an ADF listItem.
-Contents, nested lists included, keep their document order."
-  (let ((blocks (mapcan #'org-tickets--convert-to-adf-content
-                        (org-element-contents element))))
+Contents, nested lists included, keep their document order.  A
+checkbox or description tag leads the first paragraph as text."
+  (let ((blocks (org-tickets--prepend-to-first-paragraph
+                 (org-tickets--list-item-prefix element)
+                 (mapcan #'org-tickets--convert-to-adf-content
+                         (org-element-contents element)))))
     (when blocks
       (list (org-tickets--adf-node "listItem" nil blocks)))))
+
+(defun org-tickets--convert-to-adf-wrapped (element open close)
+  "Convert inline ELEMENT's contents to ADF between literal OPEN and CLOSE.
+ELEMENT's trailing :post-blank space follows CLOSE."
+  (append (org-tickets--adf-text-node open)
+          (org-tickets--build-inline-nodes (org-element-contents element))
+          (org-tickets--adf-text-node
+           (concat close (org-tickets--adf-post-blank-spaces element)))))
+
+(defun org-tickets--convert-to-adf-footnote-reference (element)
+  "Convert org ELEMENT (type footnote-reference) to its source text.
+A plain reference is \"[fn:LABEL]\"; an inline footnote keeps its
+definition, with markup, between \"[fn:LABEL:\" and \"]\"."
+  (let ((label (or (org-element-property :label element) "")))
+    (if (eq (org-element-property :type element) 'inline)
+        (org-tickets--convert-to-adf-wrapped
+         element (format "[fn:%s:" label) "]")
+      (org-tickets--convert-literal-text element (format "[fn:%s]" label)))))
+
+(defun org-tickets--convert-to-adf-footnote-definition (element)
+  "Convert org ELEMENT (type footnote-definition) to ADF blocks.
+Its \"[fn:LABEL]\" leads the first paragraph, as in the org source."
+  (org-tickets--prepend-to-first-paragraph
+   (org-tickets--adf-text-node
+    (format "[fn:%s]" (org-element-property :label element)))
+   (mapcan #'org-tickets--convert-to-adf-content
+           (org-element-contents element))))
 
 (defun org-tickets--convert-to-adf-line-break (_element)
   "Convert org _ELEMENT (type line-break, from `\\\\') to an ADF hardBreak."
@@ -387,13 +453,24 @@ stored in :post-blank."
   "Convert org ELEMENT (type macro) to ADF content.
 Defined macros expand to their text; undefined macros produce no node
 at all — Jira rejects empty text nodes."
-  (let* ((macro-key (or (org-element-property :key element)
-                        (org-element-property :macro-name element)))
-         (templates (default-value 'org-macro-templates))
-         (template (assoc macro-key templates))
-         (value (and template (org-macro-expand element templates))))
+  (let ((value (org-macro-expand element org-tickets--adf-macro-templates)))
     (org-tickets--convert-literal-text
      element (and (stringp value) (substring-no-properties value)))))
+
+(defun org-tickets--description-macro-templates ()
+  "Return the macro templates for the description in the current buffer.
+These are the description's own #+MACRO definitions, which win, then the
+global `org-macro-templates'.  A local \"(eval ...)\" definition is
+skipped: the text may have come from Jira, and a push must never run
+code found in it."
+  (let ((local nil))
+    (dolist (definition (cdar (org-collect-keywords '("MACRO"))))
+      (when (string-match "\\`\\(\\S-+\\)[ \t]*" definition)
+        (let ((name (match-string 1 definition))
+              (template (substring definition (match-end 0))))
+          (unless (string-prefix-p "(eval" template)
+            (push (cons name template) local)))))
+    (append local (default-value 'org-macro-templates))))
 
 (defun org-tickets--convert-to-adf-plain-text (element)
   "Convert org ELEMENT (type plain-text) to ADF content."
@@ -413,21 +490,23 @@ has no header row."
 
 (defun org-tickets--convert-to-adf-table (element)
   "Convert org ELEMENT (type table) to ADF content.
-Row 0 becomes a header row only when the table has a rule separator."
+Row 0 becomes a header row only when the table has a rule separator.
+A table with no data rows (only rules) converts to nothing."
   (let* ((has-header (org-tickets--table-has-header-p element))
          (rows (seq-remove (lambda (row)
                              (or (eq (org-element-property :type row) 'rule)
                                  (null (org-element-contents row))))
                            (org-element-contents element)))
          (row-index -1))
-    (list (org-tickets--adf-node
+    (when rows
+      (list (org-tickets--adf-node
            "table"
            (list (cons "layout" "default"))
            (mapcar (lambda (row)
                      (setq row-index (1+ row-index))
                      (org-tickets--convert-to-adf-table-row
                       row (and has-header (= row-index 0))))
-                   rows)))))
+                   rows))))))
 
 (defun org-tickets--convert-to-adf-table-row (element header-p)
   "Convert org ELEMENT (type table-row) to an ADF tableRow.
@@ -455,8 +534,10 @@ HEADER-P selects the tableHeader node type per the ADF schema."
 
 (defun org-tickets--convert-to-adf-content (element)
   "Convert org ELEMENT to Atlassian Document Format (ADF) content.
-Returns a list of ADF nodes.  Unknown and container types (org-data,
-section, item) convert their contents."
+Returns a list of ADF nodes.  Drawers are dropped.  Unknown and
+container types (org-data, section, center and special blocks) convert
+their contents, so elements without contents (keywords, comments,
+comment blocks, clock lines) convert to nothing."
   (pcase (org-element-type element)
     (`nil nil)
     (`headline (org-tickets--convert-to-adf-headline element))
@@ -465,7 +546,7 @@ section, item) convert their contents."
     (`italic (org-tickets--convert-inline-marked element "em"))
     (`strike-through (org-tickets--convert-inline-marked element "strike"))
     (`underline (org-tickets--convert-inline-marked element "underline"))
-    ((or `code `verbatim `inline-src-block `export-snippet)
+    ((or `code `verbatim `inline-src-block `inline-babel-call `export-snippet)
      (org-tickets--convert-value-code-marked element))
     (`link (org-tickets--convert-to-adf-link element))
     (`plain-list (org-tickets--convert-to-adf-list element))
@@ -488,6 +569,14 @@ section, item) convert their contents."
     (`plain-text (org-tickets--convert-to-adf-plain-text element))
     (`src-block (org-tickets--convert-to-adf-src-block element))
     (`table (org-tickets--convert-to-adf-table element))
+    ((or `drawer `property-drawer) nil)
+    (`footnote-reference
+     (org-tickets--convert-to-adf-footnote-reference element))
+    (`footnote-definition
+     (org-tickets--convert-to-adf-footnote-definition element))
+    (`target (org-tickets--convert-literal-text
+              element (format "<<%s>>" (org-element-property :value element))))
+    (`radio-target (org-tickets--convert-to-adf-wrapped element "<<<" ">>>"))
     (_ (mapcan #'org-tickets--convert-to-adf-content
                (org-element-contents element)))))
 
@@ -503,8 +592,11 @@ resolve attachment: links to ADF media nodes."
       (with-temp-buffer
         (insert content)
         (org-mode)
-        (setq adf-content
-              (org-tickets--convert-to-adf-content (org-element-parse-buffer))))
+        (let ((org-tickets--adf-macro-templates
+               (org-tickets--description-macro-templates)))
+          (setq adf-content
+                (org-tickets--convert-to-adf-content
+                 (org-element-parse-buffer)))))
       (when adf-content
         (list (cons "type" "doc")
               (cons "version" 1)

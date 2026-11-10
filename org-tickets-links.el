@@ -93,21 +93,42 @@ Failures are logged; the thunk always completes."
      from-key to-key "Blocks"
      (org-tickets--link-done-callback from-key to-key done))))
 
-(defun org-tickets--ticket-link-thunks (ticket key)
-  "Return the link thunks TICKET (whose key is KEY) needs.
+(defvar org-tickets--links-requested nil
+  "Hash table of the (FROM . TO) links already requested this sync, or nil.
+Phase 2 binds it so a link two tickets both name (one in BLOCKS, the
+other in BLOCKED-BY) is POSTed once.")
+
+(defun org-tickets--ticket-link-pairs (ticket key)
+  "Return the distinct (FROM . TO) \"Blocks\" links TICKET (key KEY) needs.
 Child tickets block their parent; BLOCKS entries are blocked by KEY and
 BLOCKED-BY entries block KEY.  Links from a ticket to itself are dropped."
-  (let* ((parent-key (and (org-tickets--child-type-p (org-tickets--ticket-type ticket))
-                          (org-tickets--ticket-parent-key ticket)))
-         (targets (seq-remove
-                   (lambda (to) (string= key to))
-                   (append (and (org-tickets--non-empty-string parent-key)
-                                (list parent-key))
-                           (org-tickets--ticket-blocks ticket))))
-         (blockers (seq-remove (lambda (from) (string= key from))
-                               (org-tickets--ticket-blocked-by ticket))))
-    (append (mapcar (lambda (to) (org-tickets--link-thunk key to)) targets)
-            (mapcar (lambda (from) (org-tickets--link-thunk from key)) blockers))))
+  (let ((parent-key (and (org-tickets--child-type-p (org-tickets--ticket-type ticket))
+                         (org-tickets--ticket-parent-key ticket))))
+    (seq-remove
+     (lambda (pair) (string= (car pair) (cdr pair)))
+     (delete-dups
+      (append (mapcar (lambda (to) (cons key to))
+                      (append (and (org-tickets--non-empty-string parent-key)
+                                   (list parent-key))
+                              (org-tickets--ticket-blocks ticket)))
+              (mapcar (lambda (from) (cons from key))
+                      (org-tickets--ticket-blocked-by ticket)))))))
+
+(defun org-tickets--claim-link-p (pair)
+  "Return non-nil if link PAIR still needs requesting, and record it.
+Always non-nil when `org-tickets--links-requested' is unbound."
+  (let ((requested org-tickets--links-requested))
+    (or (null requested)
+        (unless (gethash pair requested)
+          (puthash pair t requested)))))
+
+(defun org-tickets--ticket-link-thunks (ticket key)
+  "Return the link thunks TICKET (whose key is KEY) needs.
+See `org-tickets--ticket-link-pairs'; a link already requested this
+sync (`org-tickets--links-requested') is skipped."
+  (mapcar (lambda (pair) (org-tickets--link-thunk (car pair) (cdr pair)))
+          (seq-filter #'org-tickets--claim-link-p
+                      (org-tickets--ticket-link-pairs ticket key))))
 
 (defun org-tickets--async-sync-ticket-links (ticket callback)
   "Asynchronously sync block relationships for TICKET.

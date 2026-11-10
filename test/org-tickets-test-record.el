@@ -364,5 +364,27 @@ Guards against a slot being dropped or its accessor index drifting."
   (should (equal (org-tickets--ensure-list nil) nil))
   (should (equal (org-tickets--ensure-list "x") '("x"))))
 
+(ert-deftest org-tickets-test--ensure-list-wraps-dotted-pair ()
+  "A dotted pair is one value, not a list, so it is wrapped whole."
+  (should (equal (org-tickets--ensure-list '(a . b)) '((a . b)))))
+
+(ert-deftest org-tickets-test--alist-get-missing-and-nil-values ()
+  "A never-interned key and a key holding nil both read as nil."
+  (let ((key (concat "org-tickets-test-" "never-interned-" "key-q7")))
+    (should-not (intern-soft key))
+    (should-not (org-tickets--alist-get key '((id . "1"))))
+    (should-not (intern-soft key)))
+  (should-not (org-tickets--alist-get
+               "created" (org-tickets-test--json "{\"created\": null}"))))
+
+(ert-deftest org-tickets-test--attachment-created-reads-timestamp ()
+  "The creation timestamp comes from Jira metadata; absent means nil."
+  (should (equal (org-tickets--attachment-created
+                  (org-tickets-test--json
+                   "{\"id\": \"1\", \"created\": \"2026-01-02T03:04:05.000+0000\"}"))
+                 "2026-01-02T03:04:05.000+0000"))
+  (should-not (org-tickets--attachment-created
+               (org-tickets-test--json "{\"id\": \"1\"}"))))
+
 (provide 'org-tickets-test-record)
 ;;; org-tickets-test-record.el ends here
