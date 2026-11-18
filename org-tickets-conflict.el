@@ -21,8 +21,8 @@
 
 ;; Detecting Jira edits made by other people: Jira timestamp comparison,
 ;; classifying changelog entries as foreign changes, describing content
-;; conflicts, and pulling a ticket's metadata (not its text) into the
-;; heading at point.
+;; conflicts, pulling a ticket's metadata (not its text) into the
+;; heading at point, and the pre-flight check sync runs before pushing.
 
 ;;; Code:
 
@@ -30,6 +30,10 @@
 (require 'org-tickets-core)
 (require 'org-tickets-api)
 (require 'org-tickets-import)
+(require 'org-tickets-parse)
+(require 'org-tickets-async)
+(require 'org-tickets-inherit)
+(require 'org-tickets-sync-phases)
 
 (defun org-tickets--jira-time-seconds (timestamp)
   "Return Jira TIMESTAMP as float seconds since the epoch.
@@ -91,6 +95,138 @@ local value, since Jira's parent field is not used for hierarchy."
     (if parent
         (org-entry-put (point) "PARENT" parent)
       (org-entry-delete (point) "PARENT"))))
+
+;;;; Pre-flight check
+
+(defun org-tickets--remote-change-candidates ()
+  "Return (KEY . SYNCED) for each heading with a JIRA_KEY and JIRA_SYNCED."
+  (delq nil
+        (org-map-entries
+         (lambda ()
+           (let ((key (org-tickets--non-empty-string
+                       (org-entry-get (point) "JIRA_KEY")))
+                 (synced (org-tickets--non-empty-string
+                          (org-entry-get (point) "JIRA_SYNCED"))))
+             (when (and key synced)
+               (cons key synced)))))))
+
+(defun org-tickets--remote-check-failed (keys err)
+  "End the sync because ticket KEYS could not be checked, with ERR."
+  (message "org-tickets: Sync cancelled, could not check %s for remote changes: %s"
+           keys err)
+  (org-tickets--sync-cleanup))
+
+(defmacro org-tickets--with-remote-check-guard (org-buffer &rest body)
+  "Run BODY in ORG-BUFFER, ending the sync there if BODY signals.
+BODY runs from a response callback, long after the sync command
+returned, so an error must not leave ORG-BUFFER locked."
+  (declare (indent 1) (debug (form body)))
+  (let ((err (make-symbol "err")))
+    `(org-tickets--safe-with-buffer
+      ,org-buffer
+      (lambda ()
+        (condition-case ,err
+            (progn ,@body)
+          (error
+           (when org-tickets--sync-in-progress
+             (org-tickets--sync-cleanup))
+           (message "org-tickets: Sync failed: %S" ,err)))))))
+
+(defun org-tickets--check-remote-changes (org-buffer continue)
+  "Check ORG-BUFFER's synced tickets for Jira edits by someone else.
+Calls CONTINUE, a function of no arguments, once metadata-only edits
+have been pulled into ORG-BUFFER.  Content edits by someone else, or a
+failed check request, end the sync instead, leaving the buffer as it
+was.  Without any JIRA_SYNCED baseline, CONTINUE is called at once."
+  (let ((candidates (with-current-buffer org-buffer
+                      (org-tickets--remote-change-candidates))))
+    (if (null candidates)
+        (funcall continue)
+      (org-tickets--async-request
+       "GET" "/rest/api/3/myself"
+       (lambda (response err)
+         (org-tickets--with-remote-check-guard org-buffer
+           (if err
+               (org-tickets--remote-check-failed
+                (mapconcat #'car candidates ", ") err)
+             (org-tickets--fetch-changelogs
+              org-buffer candidates
+              (org-tickets--alist-get "accountId" response) continue))))))))
+
+(defun org-tickets--fetch-changelogs (org-buffer candidates account-id continue)
+  "GET the changelog of every CANDIDATES ticket, then judge the changes.
+CANDIDATES is a list of (KEY . SYNCED).  ACCOUNT-ID is the user's own
+Jira account; ORG-BUFFER and CONTINUE are as for
+`org-tickets--check-remote-changes'."
+  (org-tickets--async-batch
+   (mapcar (lambda (candidate)
+             (lambda (done)
+               (org-tickets--async-request
+                "GET" (format "/rest/api/3/issue/%s?expand=changelog"
+                              (car candidate))
+                done)))
+           candidates)
+   (lambda (results)
+     (org-tickets--with-remote-check-guard org-buffer
+       (org-tickets--judge-remote-changes
+        candidates results account-id continue)))))
+
+(defun org-tickets--remote-change-reports (candidates results account-id)
+  "Return (KEY CHANGES RESPONSE) for each changed ticket in CANDIDATES.
+RESULTS are the batch results, (RESPONSE . ERR), in CANDIDATES order;
+ACCOUNT-ID is the user's own Jira account.  Tickets without foreign
+changes are left out."
+  (delq nil
+        (seq-mapn (lambda (candidate result)
+                    (let ((changes (org-tickets--foreign-changes
+                                    (car result) account-id (cdr candidate))))
+                      (when changes
+                        (list (car candidate) changes (car result)))))
+                  candidates results)))
+
+(defun org-tickets--judge-remote-changes (candidates results account-id continue)
+  "Cancel the sync or pull metadata, given the changelog RESULTS.
+CANDIDATES, ACCOUNT-ID and CONTINUE are as for
+`org-tickets--fetch-changelogs'."
+  (let ((failed (seq-find (lambda (pair) (cddr pair))
+                          (seq-mapn #'cons candidates results))))
+    (if failed
+        (org-tickets--remote-check-failed (caar failed) (cddr failed))
+      (let* ((reports (org-tickets--remote-change-reports
+                       candidates results account-id))
+             (conflicts (seq-filter
+                         (lambda (report)
+                           (seq-some #'org-tickets--content-change-p
+                                     (nth 1 report)))
+                         reports)))
+        (if conflicts
+            (org-tickets--report-content-conflicts conflicts)
+          (org-tickets--apply-metadata-pulls reports)
+          (funcall continue))))))
+
+(defun org-tickets--report-content-conflicts (conflicts)
+  "Warn about CONFLICTS, a list of (KEY CHANGES RESPONSE), and end the sync."
+  (display-warning
+   'org-tickets
+   (concat "Sync cancelled: tickets changed in Jira by someone else:\n"
+           (mapconcat (lambda (report)
+                        (org-tickets--conflict-line (car report) (nth 1 report)))
+                      conflicts "\n")
+           "\nMerge them by hand (org-tickets-pull-remote-changes) and sync again.")
+   :warning)
+  (org-tickets--sync-cleanup))
+
+(defun org-tickets--apply-metadata-pulls (reports)
+  "Pull the metadata of each (KEY CHANGES RESPONSE) in REPORTS into org.
+Inheritance is re-run afterwards so pulled values reach child tickets."
+  (when reports
+    (let ((inhibit-read-only t))
+      (dolist (report reports)
+        (org-tickets--with-ticket-at-key (car report)
+          (org-tickets--pull-ticket-metadata (nth 2 report))))
+      (org-tickets--inherit-parent-properties-in-buffer))
+    (message "org-tickets: Pulled remote metadata for %s"
+             (mapconcat #'car reports ", "))))
 
 (provide 'org-tickets-conflict)
 ;;; org-tickets-conflict.el ends here

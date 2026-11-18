@@ -33,6 +33,7 @@
 (require 'org-tickets-links)
 (require 'org-tickets-inherit)
 (require 'org-tickets-sync-phases)
+(require 'org-tickets-conflict)
 (require 'org-tickets-import)
 
 ;;;; Issue types
@@ -246,28 +247,38 @@ are handled by their trapped callbacks and cannot re-lock the buffer."
 
 (defun org-tickets--sync-to-jira ()
   "Sync all tickets in the org document to Jira via async pipeline.
-Phase 0 (setup): parse document, check preconditions, mark buffer read-only.
+Phase 0 (setup): inherit properties, mark buffer read-only, then check
+Jira for edits by someone else (`org-tickets--check-remote-changes').
 Phase 1: create/update tickets and fetch remote data concurrently.
 Phase 2: sync attachments and issue links concurrently.
 Phase 3: apply all results to the org buffer synchronously."
   (interactive)
-  (catch 'org-tickets--sync-done
-    (when org-tickets--sync-in-progress
+  (if org-tickets--sync-in-progress
       (message "org-tickets: Sync already in progress")
-      (throw 'org-tickets--sync-done nil))
     (org-tickets--clear-sprint-cache)
     (org-tickets--ensure-issue-types)
     ;; Inherit before parsing so the payloads carry the inherited values.
     (org-tickets--inherit-parent-properties-in-buffer)
-    (let* ((doc (org-tickets--parse-document))
-           (all-features-exist-p (org-tickets--all-features-exist-p doc))
-           (org-buffer (current-buffer))
-           (ticket-count (length (org-tickets--doc-tickets doc))))
+    (let ((org-buffer (current-buffer)))
       (setq org-tickets--sync-prior-read-only buffer-read-only)
       (setq buffer-read-only t)
       (setq org-tickets--sync-in-progress t)
       (org-tickets--sync-save-point)
-      (org-tickets--progress-init ticket-count)
+      (condition-case err
+          (org-tickets--check-remote-changes
+           org-buffer (lambda () (org-tickets--sync-start org-buffer)))
+        (error
+         (when org-tickets--sync-in-progress
+           (org-tickets--sync-cleanup))
+         (signal (car err) (cdr err)))))))
+
+(defun org-tickets--sync-start (org-buffer)
+  "Parse ORG-BUFFER and start phase 1 of its sync.
+The buffer is already locked by `org-tickets--sync-to-jira'."
+  (with-current-buffer org-buffer
+    (let* ((doc (org-tickets--parse-document))
+           (all-features-exist-p (org-tickets--all-features-exist-p doc)))
+      (org-tickets--progress-init (length (org-tickets--doc-tickets doc)))
       (org-tickets--with-sync-abort doc org-buffer
         (org-tickets--sync-phase-1 doc all-features-exist-p org-buffer)))))
 

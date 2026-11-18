@@ -384,11 +384,14 @@ progress entry to the global default of `mode-line-misc-info' with
 
 (defun org-tickets-test--issue-response (&rest args)
   "Build a parsed GET /issue?expand=changelog response from JSON.
-ARGS is a plist: :updated (fields.updated), :summary, :labels, and
-:histories, a list of (AUTHOR-ID AUTHOR-NAME CREATED FIELD-ID...)."
+ARGS is a plist: :key, :type (issue type name), :updated
+\(fields.updated), :summary, :labels, and :histories, a list of
+\(AUTHOR-ID AUTHOR-NAME CREATED FIELD-ID...)."
   (org-tickets-test--json
    (json-encode
-    `((fields . ((attachment . [])
+    `((key . ,(plist-get args :key))
+      (fields . ((attachment . [])
+                 (issuetype . ((name . ,(plist-get args :type))))
                  (updated . ,(plist-get args :updated))
                  (summary . ,(plist-get args :summary))
                  (labels . ,(vconcat (plist-get args :labels)))))
