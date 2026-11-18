@@ -140,7 +140,7 @@ error there would otherwise leave ORG-BUFFER locked."
   attachments                       ; Attachment metadata fetched from Jira
   sprint                            ; Sprint name to write back to org
   due-date                          ; Due date to write back to org
-  synced                            ; Jira's updated time after the push
+  synced                            ; Jira's updated time from the pre-push GET
   is-new                            ; t when the ticket was just created
   error)                            ; Error from the request, or nil
 
