@@ -251,10 +251,11 @@ Return (FETCHED-KEY . NEW-BUFFER-TEXT)."
   (let ((fetched nil))
     (org-tickets-test--with-stubs
         ((org-tickets--resolve-config #'ignore)
-         (org-tickets--get-ticket (lambda (key) (setq fetched key) key))
+         (org-tickets--get-ticket
+          (lambda (key) (setq fetched key) (list (cons 'key key))))
          (org-tickets--parse-jira-issue
-          (lambda (key)
-            (org-tickets--ticket-create :key key :type type :summary "Pulled"
+          (lambda (response)
+            (org-tickets--ticket-create :key (alist-get 'key response) :type type :summary "Pulled"
                                         :description description :labels nil)))
          (message #'ignore))
       (org-tickets-test--with-org-buffer-at text target

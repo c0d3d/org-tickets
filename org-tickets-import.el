@@ -148,8 +148,9 @@ with an empty string, and an absent STORY_POINTS is deleted."
     (org-tickets--put-property-unless-nil
      "DUE_DATE" (or (org-tickets--ticket-due-date ticket) empty))))
 
-(defun org-tickets--issue-to-org (ticket)
-  "Insert TICKET as an org heading with Jira properties."
+(defun org-tickets--issue-to-org (ticket &optional synced)
+  "Insert TICKET as an org heading with Jira properties.
+SYNCED, when non-nil, is written as the JIRA_SYNCED baseline."
   (let ((type (org-tickets--ticket-type ticket))
         (description (org-tickets--ticket-description ticket))
         (attachments (org-tickets--ticket-attachments ticket)))
@@ -159,6 +160,7 @@ with an empty string, and an absent STORY_POINTS is deleted."
              type (org-tickets--ticket-summary ticket))
             "\n")
     (org-tickets--write-ticket-properties ticket)
+    (org-tickets--put-property-unless-nil "JIRA_SYNCED" synced)
     (when description
       (insert "\n" description "\n"))
     (dolist (att attachments)
@@ -177,7 +179,8 @@ and inserts as an org heading with all properties."
   (org-tickets--resolve-config)
   (let* ((jira-response (org-tickets--get-ticket ticket-key))
          (ticket (org-tickets--parse-jira-issue jira-response)))
-    (org-tickets--issue-to-org ticket)
+    (org-tickets--issue-to-org
+     ticket (org-tickets--issue-updated jira-response))
     (message "org-tickets: Imported %s" ticket-key)))
 
 (defun org-tickets--next-comment-subtree (end)
@@ -257,6 +260,8 @@ headings; the owning heading must have a JIRA_KEY property."
       (let* ((jira-response (org-tickets--get-ticket ticket-key))
              (ticket (org-tickets--parse-jira-issue jira-response)))
         (org-tickets--update-org-heading-from-ticket ticket)
+        (org-tickets--put-property-unless-nil
+         "JIRA_SYNCED" (org-tickets--issue-updated jira-response))
         (message "org-tickets: Pulled remote changes for %s" ticket-key)))))
 
 (provide 'org-tickets-import)

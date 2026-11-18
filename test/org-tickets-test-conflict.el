@@ -89,6 +89,33 @@
                               ("description" . "Bob")))
                  "PROJ-12: summary changed by Alice, description changed by Bob")))
 
+(ert-deftest org-tickets-test--conflict-line-names-unknown-author-someone ()
+  "A change without an author name is attributed to \"someone\"."
+  (should (equal (org-tickets--conflict-line "PROJ-12" '(("summary")))
+                 "PROJ-12: summary changed by someone")))
+
+(ert-deftest org-tickets-test--foreign-changes-names-link-items-by-field ()
+  "An issue-link item without a fieldId is named by its field, \"Link\"."
+  (let ((response (org-tickets-test--issue-response
+                   :histories `(("bob" "Bob" ,org-tickets-test--after
+                                 (field . "Link"))))))
+    (should (equal (org-tickets--foreign-changes
+                    response "me" org-tickets-test--since)
+                   '(("Link" . "Bob"))))))
+
+(ert-deftest org-tickets-test--changed-properties-maps-tracked-fields ()
+  "Tracked Jira fields map to their org properties; others to none."
+  (let ((org-tickets-sprint-field "customfield_1")
+        (org-tickets-story-points-field "customfield_2"))
+    (should (equal (sort (org-tickets--changed-properties
+                          '("labels" "fixVersions" "duedate" "issuetype"
+                            "customfield_1" "customfield_2" "Link"))
+                         #'string<)
+                   '("BLOCKED-BY" "BLOCKS" "DUE_DATE" "FIX_VERSION"
+                     "JIRA_TYPE" "LABELS" "SPRINT" "STORY_POINTS")))
+    (should-not (org-tickets--changed-properties
+                 '("status" "assignee" "Rank" "resolution" nil)))))
+
 (defmacro org-tickets-test--with-heading (properties &rest body)
   "Run BODY at a temp org heading \"Old title\" with PROPERTIES.
 PROPERTIES is an alist of (NAME . VALUE); the body text is \"Local body\"."
@@ -111,7 +138,8 @@ PROPERTIES is an alist of (NAME . VALUE); the body text is \"Local body\"."
 (ert-deftest org-tickets-test--pull-metadata-updates-properties-not-content ()
   "Metadata is refreshed while headline, body and JIRA_SYNCED stay put."
   (org-tickets-test--with-heading '(("LABELS" . "a") ("JIRA_SYNCED" . "X"))
-    (org-tickets--pull-ticket-metadata (org-tickets-test--pull-response))
+    (org-tickets--pull-ticket-metadata (org-tickets-test--pull-response)
+                                       '("LABELS"))
     (should (equal (org-entry-get (point) "LABELS") "b"))
     (should (equal (org-entry-get (point) "JIRA_SYNCED") "X"))
     (should (equal (org-get-heading t t t t) "Old title"))
@@ -121,14 +149,26 @@ PROPERTIES is an alist of (NAME . VALUE); the body text is \"Local body\"."
 (ert-deftest org-tickets-test--pull-metadata-keeps-local-parent ()
   "A local PARENT survives a pull from an issue without a parent field."
   (org-tickets-test--with-heading '(("PARENT" . "PROJ-1"))
-    (org-tickets--pull-ticket-metadata (org-tickets-test--pull-response))
+    (org-tickets--pull-ticket-metadata (org-tickets-test--pull-response)
+                                       '("LABELS"))
     (should (equal (org-entry-get (point) "PARENT") "PROJ-1"))))
 
 (ert-deftest org-tickets-test--pull-metadata-adds-no-empty-parent ()
   "A heading without PARENT does not gain an empty one."
   (org-tickets-test--with-heading '(("LABELS" . "a"))
-    (org-tickets--pull-ticket-metadata (org-tickets-test--pull-response))
+    (org-tickets--pull-ticket-metadata (org-tickets-test--pull-response)
+                                       '("LABELS"))
     (should-not (org-entry-get (point) "PARENT"))))
+
+(ert-deftest org-tickets-test--pull-metadata-keeps-unchanged-properties ()
+  "Properties not named for the pull keep their local values or absence."
+  (org-tickets-test--with-heading '(("LABELS" . "a") ("STORY_POINTS" . "3"))
+    (org-tickets--pull-ticket-metadata (org-tickets-test--pull-response)
+                                       '("LABELS"))
+    (should (equal (org-entry-get (point) "LABELS") "b"))
+    (should (equal (org-entry-get (point) "STORY_POINTS") "3"))
+    (should-not (org-entry-get (point) "SPRINT"))
+    (should-not (org-entry-get (point) "FIX_VERSION"))))
 
 (provide 'org-tickets-test-conflict)
 ;;; org-tickets-test-conflict.el ends here

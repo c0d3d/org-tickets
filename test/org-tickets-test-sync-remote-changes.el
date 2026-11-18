@@ -259,13 +259,128 @@ are pushed onto the variable WARNINGS."
                                     "bob" "Bob" "labels")))))
       log _warnings
     (org-tickets-test--with-stubs
-        ((org-tickets--pull-ticket-metadata (lambda (_) (error "Boom")))
+        ((org-tickets--pull-ticket-metadata (lambda (&rest _) (error "Boom")))
          (message #'ignore))
       (org-tickets-test--insert-synced-feature "Feature A" "PROJ-10")
       (org-tickets-test--run-sync)
       (should-not (org-tickets-test--pushes log))
       (should-not buffer-read-only)
       (should-not org-tickets--sync-in-progress))))
+
+(defmacro org-tickets-test--with-messages (messages &rest body)
+  "Run BODY, pushing each formatted `message' onto the variable MESSAGES."
+  (declare (indent 1))
+  `(org-tickets-test--with-stubs
+       ((message (lambda (format-string &rest args)
+                   (when format-string
+                     (push (apply #'format format-string args) ,messages)))))
+     ,@body))
+
+(ert-deftest org-tickets-test--sync-cancels-when-account-lookup-fails ()
+  "A failed /myself request cancels the sync and blames the account lookup."
+  (let* ((log nil)
+         (messages nil)
+         (ok (org-tickets-test--fake-jira-handler
+              :get (org-tickets-test--remote-get nil) :log log))
+         (handler (lambda (method endpoint callback &optional data)
+                    (if (equal endpoint "/rest/api/3/myself")
+                        (funcall callback nil "boom")
+                      (funcall ok method endpoint callback data)))))
+    (org-tickets-test--with-sync-mocks handler
+      (org-tickets-test--with-messages messages
+        (with-temp-buffer
+          (org-mode)
+          (org-tickets-test--insert-synced-feature "Feature A" "PROJ-10")
+          (org-tickets-test--run-sync)
+          (should-not (org-tickets-test--pushes log))
+          (should-not buffer-read-only)
+          (should-not org-tickets--sync-in-progress)
+          (should (seq-find (lambda (m)
+                              (string-match-p "could not look up your Jira account: boom" m))
+                            messages))
+          (should-not (seq-find (lambda (m) (string-match-p "PROJ-10" m))
+                                messages)))))))
+
+(ert-deftest org-tickets-test--sync-check-failure-suggests-deleted-ticket-fix ()
+  "A failed check request tells the user how to unblock a deleted ticket."
+  (let* ((messages nil)
+         (ok (org-tickets-test--fake-jira-handler
+              :get (org-tickets-test--remote-get nil)))
+         (handler (lambda (method endpoint callback &optional data)
+                    (if (string-match-p "expand=changelog" endpoint)
+                        (funcall callback nil "404")
+                      (funcall ok method endpoint callback data)))))
+    (org-tickets-test--with-sync-mocks handler
+      (org-tickets-test--with-messages messages
+        (with-temp-buffer
+          (org-mode)
+          (org-tickets-test--insert-synced-feature "Feature A" "PROJ-10")
+          (org-tickets-test--run-sync)
+          (should (seq-find
+                   (lambda (m)
+                     (string-match-p
+                      "if the ticket was deleted, remove its JIRA_KEY and JIRA_SYNCED"
+                      m))
+                   messages)))))))
+
+(ert-deftest org-tickets-test--sync-keeps-local-metadata-on-untracked-change ()
+  "A foreign status change pulls nothing, so local LABELS are pushed."
+  (let ((messages nil))
+    (org-tickets-test--with-remote-sync
+        (list (cons "PROJ-10" (org-tickets-test--remote-issue
+                               "PROJ-10" :labels '("remote") :histories
+                               (list (org-tickets-test--edit-by
+                                      "bob" "Bob" "status")))))
+        log warnings
+      (org-tickets-test--with-messages messages
+        (org-tickets-test--insert-synced-feature "Feature A" "PROJ-10"
+                                                 "LABELS" "local")
+        (org-tickets-test--run-sync))
+      (should (equal (org-tickets-test--prop-of "PROJ-10" "LABELS") "local"))
+      (let ((put (car (org-tickets-test--requests
+                       log "PUT" "/rest/api/3/issue/PROJ-10"))))
+        (should (equal (append (org-tickets-test--payload-field
+                                (nth 2 put) 'labels)
+                               nil)
+                       '("local"))))
+      (should-not (seq-find (lambda (m) (string-match-p "Pulled remote metadata" m))
+                            messages))
+      (should-not warnings))))
+
+(ert-deftest org-tickets-test--sync-pulls-only-changed-metadata ()
+  "A foreign labels change pulls LABELS but keeps a local STORY_POINTS edit."
+  (org-tickets-test--with-remote-sync
+      (list (cons "PROJ-10" (org-tickets-test--remote-issue
+                             "PROJ-10" :labels '("remote") :histories
+                             (list (org-tickets-test--edit-by
+                                    "bob" "Bob" "labels")))))
+      _log _warnings
+    (org-tickets-test--insert-synced-feature "Feature A" "PROJ-10"
+                                             "LABELS" "local"
+                                             "STORY_POINTS" "5")
+    (org-tickets-test--run-sync)
+    (should (equal (org-tickets-test--prop-of "PROJ-10" "LABELS") "remote"))
+    (should (equal (org-tickets-test--prop-of "PROJ-10" "STORY_POINTS") "5"))))
+
+(ert-deftest org-tickets-test--sync-pushes-after-pulling-content-conflict ()
+  "Pulling a conflicting ticket records a baseline, so the next sync pushes."
+  (org-tickets-test--with-remote-sync
+      (list (cons "PROJ-10" (org-tickets-test--remote-issue
+                             "PROJ-10" :summary "Feature A" :histories
+                             (list (org-tickets-test--edit-by
+                                    "bob" "Bob" "description")))))
+      log warnings
+    (org-tickets-test--insert-synced-feature "Feature A" "PROJ-10")
+    (org-tickets-test--run-sync)
+    (should-not (org-tickets-test--pushes log))
+    (goto-char (point-min))
+    (org-tickets-test--with-stubs ((message #'ignore))
+      (org-tickets-pull-remote-changes))
+    (should (equal (org-tickets-test--prop-of "PROJ-10" "JIRA_SYNCED")
+                   org-tickets-test--updated))
+    (org-tickets-test--run-sync)
+    (should (org-tickets-test--requests log "PUT" "/rest/api/3/issue/PROJ-10"))
+    (should (= (length warnings) 1))))
 
 (provide 'org-tickets-test-sync-remote-changes)
 ;;; org-tickets-test-sync-remote-changes.el ends here

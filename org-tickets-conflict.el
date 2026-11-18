@@ -48,11 +48,15 @@ Keeps the fractional seconds that `iso8601-parse' drops."
   (> (org-tickets--jira-time-seconds a) (org-tickets--jira-time-seconds b)))
 
 (defun org-tickets--history-changes (history)
-  "Return (FIELD-ID . AUTHOR-NAME) for each changelog item in HISTORY."
+  "Return (FIELD-ID . AUTHOR-NAME) for each changelog item in HISTORY.
+An item without a fieldId, such as an issue link (\"Link\"), is named
+by its field."
   (let ((name (org-tickets--alist-get
                "displayName" (org-tickets--alist-get "author" history))))
     (mapcar (lambda (item)
-              (cons (org-tickets--alist-get "fieldId" item) name))
+              (cons (or (org-tickets--alist-get "fieldId" item)
+                        (org-tickets--alist-get "field" item))
+                    name))
             (org-tickets--ensure-list (org-tickets--alist-get "items" history)))))
 
 (defun org-tickets--foreign-changes (response account-id since)
@@ -81,20 +85,48 @@ skipped."
   "Describe the content changes in CHANGES for ticket KEY on one line."
   (format "%s: %s" key
           (mapconcat (lambda (change)
-                       (format "%s changed by %s" (car change) (cdr change)))
+                       (format "%s changed by %s" (car change)
+                               (or (cdr change) "someone")))
                      (seq-filter #'org-tickets--content-change-p changes)
                      ", ")))
 
-(defun org-tickets--pull-ticket-metadata (response)
-  "Write the metadata of issue RESPONSE to the ticket heading at point.
-Headline, description and JIRA_SYNCED are left alone.  PARENT keeps its
-local value, since Jira's parent field is not used for hierarchy."
-  (let ((parent (org-entry-get (point) "PARENT")))
+(defconst org-tickets--metadata-properties
+  '("JIRA_TYPE" "FIX_VERSION" "LABELS" "BLOCKS" "BLOCKED-BY" "PARENT"
+    "STORY_POINTS" "SPRINT" "DUE_DATE")
+  "Properties `org-tickets--write-ticket-properties' writes, besides JIRA_KEY.")
+
+(defun org-tickets--field-properties (field-id)
+  "Return a fresh list of the org properties tracking Jira FIELD-ID."
+  (pcase field-id
+    ("labels" (list "LABELS"))
+    ("fixVersions" (list "FIX_VERSION"))
+    ("duedate" (list "DUE_DATE"))
+    ("issuetype" (list "JIRA_TYPE"))
+    ((or "Link" "issuelinks") (list "BLOCKS" "BLOCKED-BY"))
+    ((pred (equal org-tickets-sprint-field)) (list "SPRINT"))
+    ((pred (equal org-tickets-story-points-field)) (list "STORY_POINTS"))))
+
+(defun org-tickets--changed-properties (field-ids)
+  "Return the org properties tracking any of the Jira FIELD-IDS.
+Fields org does not track, such as status or assignee, map to none.
+PARENT is never included: it is a Blocks link, not Jira's parent field."
+  (delete-dups (mapcan #'org-tickets--field-properties field-ids)))
+
+(defun org-tickets--pull-ticket-metadata (response properties)
+  "Write PROPERTIES from issue RESPONSE to the ticket heading at point.
+PROPERTIES are org property names, e.g. from
+`org-tickets--changed-properties'.  Every other metadata property keeps
+its local value, or stays absent.  Headline, description and
+JIRA_SYNCED are left alone."
+  (let ((kept (mapcar (lambda (name) (cons name (org-entry-get (point) name)))
+                      (seq-difference org-tickets--metadata-properties
+                                      properties))))
     (org-tickets--write-ticket-properties
      (org-tickets--parse-jira-issue response) t)
-    (if parent
-        (org-entry-put (point) "PARENT" parent)
-      (org-entry-delete (point) "PARENT"))))
+    (dolist (property kept)
+      (if (cdr property)
+          (org-entry-put (point) (car property) (cdr property))
+        (org-entry-delete (point) (car property))))))
 
 ;;;; Pre-flight check
 
@@ -112,8 +144,16 @@ local value, since Jira's parent field is not used for hierarchy."
 
 (defun org-tickets--remote-check-failed (keys err)
   "End the sync because ticket KEYS could not be checked, with ERR."
-  (message "org-tickets: Sync cancelled, could not check %s for remote changes: %s"
+  (message (concat "org-tickets: Sync cancelled, could not check %s for "
+                   "remote changes: %s (if the ticket was deleted, remove "
+                   "its JIRA_KEY and JIRA_SYNCED)")
            keys err)
+  (org-tickets--sync-cleanup))
+
+(defun org-tickets--account-lookup-failed (err)
+  "End the sync because the user's Jira account lookup failed with ERR."
+  (message "org-tickets: Sync cancelled, could not look up your Jira account: %s"
+           err)
   (org-tickets--sync-cleanup))
 
 (defmacro org-tickets--with-remote-check-guard (org-buffer &rest body)
@@ -147,8 +187,7 @@ was.  Without any JIRA_SYNCED baseline, CONTINUE is called at once."
        (lambda (response err)
          (org-tickets--with-remote-check-guard org-buffer
            (if err
-               (org-tickets--remote-check-failed
-                (mapconcat #'car candidates ", ") err)
+               (org-tickets--account-lookup-failed err)
              (org-tickets--fetch-changelogs
               org-buffer candidates
               (org-tickets--alist-get "accountId" response) continue))))))))
@@ -192,17 +231,21 @@ CANDIDATES, ACCOUNT-ID and CONTINUE are as for
                           (seq-mapn #'cons candidates results))))
     (if failed
         (org-tickets--remote-check-failed (caar failed) (cddr failed))
-      (let* ((reports (org-tickets--remote-change-reports
-                       candidates results account-id))
-             (conflicts (seq-filter
-                         (lambda (report)
-                           (seq-some #'org-tickets--content-change-p
-                                     (nth 1 report)))
-                         reports)))
-        (if conflicts
-            (org-tickets--report-content-conflicts conflicts)
-          (org-tickets--apply-metadata-pulls reports)
-          (funcall continue))))))
+      (org-tickets--act-on-remote-changes
+       (org-tickets--remote-change-reports candidates results account-id)
+       continue))))
+
+(defun org-tickets--act-on-remote-changes (reports continue)
+  "Cancel the sync over content conflicts in REPORTS, or pull and CONTINUE.
+REPORTS is a list of (KEY CHANGES RESPONSE)."
+  (let ((conflicts (seq-filter (lambda (report)
+                                 (seq-some #'org-tickets--content-change-p
+                                           (nth 1 report)))
+                               reports)))
+    (if conflicts
+        (org-tickets--report-content-conflicts conflicts)
+      (org-tickets--apply-metadata-pulls reports)
+      (funcall continue))))
 
 (defun org-tickets--report-content-conflicts (conflicts)
   "Warn about CONFLICTS, a list of (KEY CHANGES RESPONSE), and end the sync."
@@ -216,17 +259,26 @@ CANDIDATES, ACCOUNT-ID and CONTINUE are as for
    :warning)
   (org-tickets--sync-cleanup))
 
+(defun org-tickets--report-properties (report)
+  "Return the org properties changed by the CHANGES of REPORT.
+REPORT is (KEY CHANGES RESPONSE)."
+  (org-tickets--changed-properties (mapcar #'car (nth 1 report))))
+
 (defun org-tickets--apply-metadata-pulls (reports)
-  "Pull the metadata of each (KEY CHANGES RESPONSE) in REPORTS into org.
-Inheritance is re-run afterwards so pulled values reach child tickets."
-  (when reports
-    (let ((inhibit-read-only t))
-      (dolist (report reports)
+  "Pull the changed metadata of each (KEY CHANGES RESPONSE) in REPORTS.
+Only properties whose Jira fields changed are pulled; a ticket whose
+changes touch no tracked field is left alone.  Inheritance is re-run
+afterwards so pulled values reach child tickets."
+  (let ((pulls (seq-filter #'org-tickets--report-properties reports))
+        (inhibit-read-only t))
+    (when pulls
+      (dolist (report pulls)
         (org-tickets--with-ticket-at-key (car report)
-          (org-tickets--pull-ticket-metadata (nth 2 report))))
-      (org-tickets--inherit-parent-properties-in-buffer))
-    (message "org-tickets: Pulled remote metadata for %s"
-             (mapconcat #'car reports ", "))))
+          (org-tickets--pull-ticket-metadata
+           (nth 2 report) (org-tickets--report-properties report))))
+      (org-tickets--inherit-parent-properties-in-buffer)
+      (message "org-tickets: Pulled remote metadata for %s"
+               (mapconcat #'car pulls ", ")))))
 
 (provide 'org-tickets-conflict)
 ;;; org-tickets-conflict.el ends here

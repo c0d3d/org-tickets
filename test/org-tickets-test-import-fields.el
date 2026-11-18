@@ -177,8 +177,30 @@ STORY_POINTS is removed, the others are left empty."
                                 '("JIRA_KEY" "JIRA_TYPE" "FIX_VERSION" "LABELS"
                                   "DUE_DATE"))
                         '("PROJ-5" "Feature" "25.3" "x" "2026-12-01")))
+         (should-not (org-entry-get (point) "JIRA_SYNCED"))
          (should (string-match-p ":END:\n\nDesc\\.\n" (buffer-string))))))
     (should (equal fetched '("PROJ-5")))))
+
+(ert-deftest org-tickets-test--import-feature-records-jira-synced ()
+  "An imported issue gets JIRA_SYNCED from Jira's updated time."
+  (org-tickets-test--with-fake-config
+   (org-tickets-test--with-stubs
+       ((org-tickets--get-ticket
+         (lambda (_key)
+           (org-tickets-test--json
+            "{\"key\":\"PROJ-5\",\"fields\":{
+               \"issuetype\":{\"name\":\"Feature\"},\"summary\":\"Big\",
+               \"updated\":\"2026-11-18T10:00:00.000+0000\",
+               \"description\":{\"type\":\"doc\",\"version\":1,\"content\":[
+                 {\"type\":\"heading\",\"attrs\":{\"level\":1},\"content\":[
+                   {\"type\":\"text\",\"text\":\"Sub\"}]}]}}}"))))
+     (with-temp-buffer
+       (org-mode)
+       (org-tickets-import-feature "PROJ-5")
+       (goto-char (point-min))
+       (should (equal (org-entry-get (point) "JIRA_SYNCED")
+                      "2026-11-18T10:00:00.000+0000"))
+       (should (= (how-many "JIRA_SYNCED" (point-min) (point-max)) 1))))))
 
 (provide 'org-tickets-test-import-fields)
 

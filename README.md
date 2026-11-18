@@ -105,6 +105,16 @@ This will:
 3. Sync block relationships
 4. Sync attachments (bidirectional)
 
+Before anything is pushed, sync checks each ticket that has a
+`JIRA_SYNCED` baseline for Jira edits made by someone else since that
+baseline.  If anyone else changed a ticket's summary or description, the
+whole sync is cancelled with a warning listing the tickets; merge those
+changes with `M-x org-tickets-pull-remote-changes` on each ticket, then
+sync again.  If others changed only metadata (labels, sprint, story
+points, fix version, due date, type, blocks/blocked-by), just the changed
+fields are pulled into the heading before the push.  A ticket without
+`JIRA_SYNCED` is not checked until its next successful push records one.
+
 ### Managing Relationships
 
 ```elisp
@@ -244,6 +254,7 @@ Intro text.
 | `BLOCKS` | Comma-separated keys this ticket blocks |
 | `BLOCKED-BY` | Comma-separated keys blocking this ticket |
 | `PARENT` | Parent ticket key (for Stories under Features) |
+| `JIRA_SYNCED` | Jira's last-updated time at the last push, import or pull; set automatically, used to detect others' edits |
 
 ## Commands
 

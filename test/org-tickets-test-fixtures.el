@@ -386,7 +386,8 @@ progress entry to the global default of `mode-line-misc-info' with
   "Build a parsed GET /issue?expand=changelog response from JSON.
 ARGS is a plist: :key, :type (issue type name), :updated
 \(fields.updated), :summary, :labels, and :histories, a list of
-\(AUTHOR-ID AUTHOR-NAME CREATED FIELD-ID...)."
+\(AUTHOR-ID AUTHOR-NAME CREATED FIELD-ID...).  A FIELD-ID that is a
+cons, such as (field . \"Link\"), is used as the whole changelog item."
   (org-tickets-test--json
    (json-encode
     `((key . ,(plist-get args :key))
@@ -404,7 +405,9 @@ ARGS is a plist: :key, :type (issue type name), :updated
                                (displayName . ,(nth 1 h))))
                     (created . ,(nth 2 h))
                     (items . ,(vconcat
-                               (mapcar (lambda (id) `((fieldId . ,id)))
+                               (mapcar (lambda (id)
+                                         (if (consp id) (list id)
+                                           `((fieldId . ,id))))
                                        (nthcdr 3 h))))))
                 (plist-get args :histories))))))))))
 
