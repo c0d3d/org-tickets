@@ -19,6 +19,7 @@ The package is split into logical modules for maintainability.
 | `org-tickets-links.el` | "Blocks" link creation (`--async-create-link`, per-ticket link thunks), ticket-marker helpers (`--at-ticket-marker`, `--ticket-buffer-key`, `--ticket-parent-key`) |
 | `org-tickets-inherit.el` | DUE_DATE/FIX_VERSION inheritance from the PARENT or ancestor ticket, remote parent cache (`--with-parent-cache`) |
 | `org-tickets-sync-phases.el` | Async sync pipeline: setup/teardown (`--sync-cleanup`), phase 1 (create/update), phase 2 (attachments+links), phase 3 (apply results: `--set-org-*`, `--resolve-blocked-by-in-org`) |
+| `org-tickets-conflict.el` | Remote change check helpers: Jira timestamp comparison (`--jira-time-later-p`), foreign-change classification from the changelog (`--foreign-changes`, `--content-change-p`, `--conflict-line`), and `--pull-ticket-metadata` (writes metadata, not text, to the heading at point; keeps local PARENT) |
 | `org-tickets-sync.el` | Sync entry point, issue type loading (`--ensure-issue-types`: document first, else fetch and save), story creation, block links, fix version/label/story sizing commands |
 | `org-tickets-cmd.el` | Interactive commands, templates |
 

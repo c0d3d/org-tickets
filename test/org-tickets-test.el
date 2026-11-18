@@ -53,6 +53,7 @@
 (require 'org-tickets-test-sync-errors)
 (require 'org-tickets-test-sync-commands)
 (require 'org-tickets-test-sync-remote-changes)
+(require 'org-tickets-test-conflict)
 
 (provide 'org-tickets-test)
 

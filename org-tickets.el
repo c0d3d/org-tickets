@@ -57,6 +57,7 @@
 (require 'org-tickets-links)
 (require 'org-tickets-inherit)
 (require 'org-tickets-sync-phases)
+(require 'org-tickets-conflict)
 (require 'org-tickets-sync)
 (require 'org-tickets-cmd)
 
