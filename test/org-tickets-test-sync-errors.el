@@ -161,7 +161,7 @@ default sprint configured, and is counted as an error."
            (org-tickets--ticket-fields #'ignore))
         (with-temp-buffer
           (org-tickets--fire-ticket-put
-           (org-tickets--ticket-create :key "PROJ-1") "PROJ-1" nil "Sprint 1" nil
+           (org-tickets--ticket-create :key "PROJ-1") "PROJ-1" nil "Sprint 1" nil nil
            (current-buffer)
            (lambda (result err) (push (cons result err) results))))))
     (should-not requests)

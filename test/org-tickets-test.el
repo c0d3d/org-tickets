@@ -52,6 +52,7 @@
 (require 'org-tickets-test-cmd-attach)
 (require 'org-tickets-test-sync-errors)
 (require 'org-tickets-test-sync-commands)
+(require 'org-tickets-test-sync-remote-changes)
 
 (provide 'org-tickets-test)
 

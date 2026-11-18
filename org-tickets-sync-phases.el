@@ -140,12 +140,13 @@ error there would otherwise leave ORG-BUFFER locked."
   attachments                       ; Attachment metadata fetched from Jira
   sprint                            ; Sprint name to write back to org
   due-date                          ; Due date to write back to org
+  synced                            ; Jira's updated time after the push
   is-new                            ; t when the ticket was just created
   error)                            ; Error from the request, or nil
 
-(defun org-tickets--fire-ticket-put (ticket key attachments sprint due-date org-buffer done)
+(defun org-tickets--fire-ticket-put (ticket key attachments sprint due-date synced org-buffer done)
   "Fire async PUT for TICKET with KEY and call DONE when complete.
-ATTACHMENTS, SPRINT, DUE-DATE are fetched data from the GET.
+ATTACHMENTS, SPRINT, DUE-DATE, SYNCED are fetched data from the GET.
 ORG-BUFFER is for progress tracking.  DONE is the batch callback."
   (let* ((fields (org-tickets--ticket-fields ticket :attachments attachments))
          (finish (lambda (err)
@@ -154,7 +155,7 @@ ORG-BUFFER is for progress tracking.  DONE is the batch callback."
                    (funcall done (org-tickets--sync-result-create
                                    :key key :ticket ticket
                                    :attachments attachments
-                                   :sprint sprint :due-date due-date
+                                   :sprint sprint :due-date due-date :synced synced
                                    :is-new nil :error err)
                             nil))))
     (if (null fields)
@@ -180,9 +181,10 @@ ORG-BUFFER is the originating buffer for progress tracking."
                         nil))
            (let ((attachments (org-tickets--issue-attachments get-response))
                  (sprint (org-tickets--issue-sprint get-response))
-                 (due-date (org-tickets--issue-due-date get-response)))
+                 (due-date (org-tickets--issue-due-date get-response))
+                 (synced (org-tickets--issue-updated get-response)))
              (org-tickets--fire-ticket-put
-              ticket key attachments sprint due-date org-buffer done))))))))
+              ticket key attachments sprint due-date synced org-buffer done))))))))
 
 (defun org-tickets--make-new-ticket-thunk (ticket org-buffer)
   "Create a thunk that POSTs TICKET as a new issue from ORG-BUFFER.
@@ -485,6 +487,15 @@ PHASE-1-RESULTS is the list of result records from phase 1."
                                      #'org-tickets--sync-result-due-date
                                      #'org-tickets--set-org-due-date))
 
+(defun org-tickets--apply-synced-updates (phase-1-results)
+  "Record JIRA_SYNCED for each successfully pushed result in PHASE-1-RESULTS."
+  (dolist (result phase-1-results)
+    (let ((key (org-tickets--sync-result-key result))
+          (synced (org-tickets--sync-result-synced result)))
+      (when (and key synced (not (org-tickets--sync-result-error result)))
+        (org-tickets--with-ticket-at-key key
+          (org-entry-put (point) "JIRA_SYNCED" synced))))))
+
 (defun org-tickets--apply-due-date-inheritance (doc)
   "Inherit due dates from parent features to child tickets in DOC.
 Catches dates that only became known during this run -- a parent whose
@@ -531,6 +542,7 @@ markers released even when applying a result signals an error."
            (let ((inhibit-read-only t))
              (org-tickets--apply-sprint-updates phase-1-results)
              (org-tickets--apply-due-date-updates phase-1-results)
+             (org-tickets--apply-synced-updates phase-1-results)
              (org-tickets--apply-due-date-inheritance doc)
              (org-tickets--resolve-blocked-by-in-org doc))
          (org-tickets--sync-cleanup)

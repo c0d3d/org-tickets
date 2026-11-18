@@ -48,6 +48,10 @@ Returns nil when RESPONSE lacks a fields object or that field."
   "Return the due date of the Jira issue RESPONSE, or nil."
   (org-tickets--response-field response "duedate"))
 
+(defun org-tickets--issue-updated (response)
+  "Return the last-updated timestamp of the Jira issue RESPONSE, or nil."
+  (org-tickets--response-field response "updated"))
+
 (defun org-tickets--issue-fix-version (response)
   "Return the name of the first fix version of issue RESPONSE, or nil."
   (let ((first (car (org-tickets--ensure-list

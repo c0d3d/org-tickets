@@ -382,6 +382,29 @@ progress entry to the global default of `mode-line-misc-info' with
   (org-tickets-test--with-stubs ((org-tickets--progress-install #'ignore))
     (org-tickets--sync-to-jira)))
 
+(defun org-tickets-test--issue-response (&rest args)
+  "Build a parsed GET /issue?expand=changelog response from JSON.
+ARGS is a plist: :updated (fields.updated), :summary, :labels, and
+:histories, a list of (AUTHOR-ID AUTHOR-NAME CREATED FIELD-ID...)."
+  (org-tickets-test--json
+   (json-encode
+    `((fields . ((attachment . [])
+                 (updated . ,(plist-get args :updated))
+                 (summary . ,(plist-get args :summary))
+                 (labels . ,(vconcat (plist-get args :labels)))))
+      (changelog
+       . ((histories
+           . ,(vconcat
+               (mapcar
+                (lambda (h)
+                  `((author . ((accountId . ,(nth 0 h))
+                               (displayName . ,(nth 1 h))))
+                    (created . ,(nth 2 h))
+                    (items . ,(vconcat
+                               (mapcar (lambda (id) `((fieldId . ,id)))
+                                       (nthcdr 3 h))))))
+                (plist-get args :histories))))))))))
+
 ;;;; ADF and ticket helpers
 
 (defconst org-tickets-test--parent-types
